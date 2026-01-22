@@ -107,7 +107,7 @@
       transition: all 0.2s;
     }
     
-    button:hover {
+    button:hover:not(:disabled) {
       background: #f0f0f0;
     }
     
@@ -139,6 +139,25 @@
       font-size: 64px;
       margin-bottom: 16px;
     }
+
+    .error {
+      background: #2a1a1a;
+      border: 1px solid #ff4444;
+      padding: 16px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+
+    .error-title {
+      color: #ff4444;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .error-text {
+      color: #ffaaaa;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -163,6 +182,11 @@
           <span class="value">Full stake</span>
         </div>
       </div>
+
+      <div id="error-display" style="display: none;" class="error">
+        <div class="error-title">Error</div>
+        <div class="error-text" id="error-text"></div>
+      </div>
       
       <div id="card-element"></div>
       <div id="card-errors"></div>
@@ -181,10 +205,19 @@
 
   <script>
     // Get payment intent ID from URL
-    const paymentIntentId = window.location.pathname.split('/').pop();
+    const urlPath = window.location.pathname;
+    const paymentIntentId = urlPath.split('/').pop();
     
-    // Initialize Stripe
-    const stripe = Stripe('pk_live_51RyPAIR9AH5bIr2HV11IB5iZBSwWt0LTvL0aDyLyiCXtQgDI6LgOSYdNjBnYJ4Z5EJI7sXnJgDZwzOmHNxf22cF500mqHCBIuC'); // Replace with your key
+    console.log('Payment Intent ID:', paymentIntentId);
+
+    if (!paymentIntentId || paymentIntentId === 'pay') {
+      document.getElementById('error-display').style.display = 'block';
+      document.getElementById('error-text').textContent = 'Invalid payment link. Please request a new link from Cheengu.';
+      document.getElementById('submit-button').disabled = true;
+    }
+    
+    // Initialize Stripe - REPLACE WITH YOUR PUBLISHABLE KEY
+    const stripe = Stripe('pk_live_51RyPAIR9AH5bIr2HV11IB5iZBSwWt0LTvL0aDyLyiCXtQgDI6LgOSYdNjBnYJ4Z5EJI7sXnJgDZwzOmHNxf22cF500mqHCBIuC');
     const elements = stripe.elements();
     const cardElement = elements.create('card', {
       style: {
@@ -206,6 +239,8 @@
     const form = document.getElementById('payment-form');
     const submitButton = document.getElementById('submit-button');
     const cardErrors = document.getElementById('card-errors');
+    const errorDisplay = document.getElementById('error-display');
+    const errorText = document.getElementById('error-text');
     
     cardElement.on('change', (event) => {
       cardErrors.textContent = event.error ? event.error.message : '';
@@ -215,10 +250,20 @@
       e.preventDefault();
       submitButton.disabled = true;
       submitButton.innerHTML = '<span class="loading"></span>';
+      errorDisplay.style.display = 'none';
       
       try {
+        // First, retrieve the payment intent to get the client secret
+        const response = await fetch(`/api/payment-intent/${paymentIntentId}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to retrieve payment information');
+        }
+
+        const { clientSecret } = await response.json();
+
         const { error, paymentIntent } = await stripe.confirmCardPayment(
-          paymentIntentId,
+          clientSecret,
           {
             payment_method: {
               card: cardElement,
@@ -227,6 +272,8 @@
         );
         
         if (error) {
+          errorDisplay.style.display = 'block';
+          errorText.textContent = error.message;
           cardErrors.textContent = error.message;
           submitButton.disabled = false;
           submitButton.textContent = 'Pay $20';
@@ -235,6 +282,9 @@
           document.getElementById('success-message').style.display = 'block';
         }
       } catch (err) {
+        console.error('Payment error:', err);
+        errorDisplay.style.display = 'block';
+        errorText.textContent = err.message || 'Payment failed. Please try again.';
         cardErrors.textContent = 'Payment failed. Please try again.';
         submitButton.disabled = false;
         submitButton.textContent = 'Pay $20';
