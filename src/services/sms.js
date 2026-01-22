@@ -1,26 +1,19 @@
-// ============================================================================
-// FILE: src/services/sms.js
-// ============================================================================
+// src/services/sms.js
 
 const { twilioClient, CHEENGU_PHONE } = require('../config/twilio');
 
 async function sendSMS(to, body) {
-    try {
-      if (!to || !to.startsWith('+') || to.length < 11) {
-        console.warn(`Skipping SMS send to invalid number: ${to}`);
-        return;
-      }
-  
-      await client.messages.create({
-        to,
-        from: process.env.TWILIO_PHONE_NUMBER,
-        body,
-      });
-    } catch (err) {
-      console.error('Non-fatal SMS send failure:', err.message);
-    }
+  try {
+    await twilioClient.messages.create({
+      body,
+      from: CHEENGU_PHONE,
+      to
+    });
+    console.log(`📤 SMS sent to ${to}: ${body}`);
+  } catch (error) {
+    console.error(`❌ Failed to send SMS to ${to}:`, error);
+    throw error;
   }
-  
-  
+}
 
 module.exports = { sendSMS };
