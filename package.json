@@ -1,0 +1,30 @@
+// ============================================================================
+// FILE: package.json
+// ============================================================================
+
+{
+    "name": "cheengu",
+    "version": "1.0.0",
+    "description": "SMS-based accountability system with human verification",
+    "main": "server.js",
+    "scripts": {
+      "start": "node server.js",
+      "dev": "nodemon server.js",
+      "setup-db": "psql $DATABASE_URL -f database/schema.sql"
+    },
+    "keywords": ["sms", "accountability", "fitness", "commitment"],
+    "author": "Your Name",
+    "license": "MIT",
+    "dependencies": {
+      "express": "^4.18.2",
+      "twilio": "^4.19.0",
+      "@supabase/supabase-js": "^2.39.0",
+      "stripe": "^14.10.0",
+      "node-cron": "^3.0.3",
+      "moment-timezone": "^0.5.43",
+      "dotenv": "^16.3.1"
+    },
+    "devDependencies": {
+      "nodemon": "^3.0.2"
+    }
+  }
