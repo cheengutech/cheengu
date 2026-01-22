@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const twilioWebhook = require('./src/handlers/twilio-webhook');
 const stripeWebhook = require('./src/handlers/stripe-webhook');
 const { startDailyCronJobs } = require('./src/services/scheduler');
@@ -14,6 +15,11 @@ app.use(express.static('public'));
 // Routes
 app.post('/sms', twilioWebhook);
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
+// Serve payment page for any /pay/* route
+app.get('/pay/:paymentIntentId', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'pay.html'));
+});
 
 // API endpoint to get payment intent client secret
 app.get('/api/payment-intent/:id', async (req, res) => {
@@ -31,19 +37,21 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Test DB endpoint (can remove later)
+app.get('/test-db', async (req, res) => {
+  const { supabase } = require('./src/config/database');
+  try {
+    const { data, error } = await supabase.from('users').select('count');
+    if (error) throw error;
+    res.json({ status: 'ok', message: 'Database connected' });
+  } catch (error) {
+    res.status(500).json({ status: 'error', message: error.message });
+  }
+});
+
 // Start cron jobs
 startDailyCronJobs();
-// Add this before the "Start server" line
-app.get('/test-db', async (req, res) => {
-    const { supabase } = require('./src/config/database');
-    try {
-      const { data, error } = await supabase.from('users').select('count');
-      if (error) throw error;
-      res.json({ status: 'ok', message: 'Database connected' });
-    } catch (error) {
-      res.status(500).json({ status: 'error', message: error.message });
-    }
-  });
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
