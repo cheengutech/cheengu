@@ -1,103 +1,39 @@
-// ============================================================================
-// FILE: src/services/scheduler.js
-// ============================================================================
+// src/handlers/twilio-webhook.js
 
-const cron = require('node-cron');
-const { supabase } = require('../config/database');
-const { sendSMS } = require('./sms');
-const { getUserHour, getTodayDate } = require('../utils/timezone');
-const { handleFailure, endCommitment } = require('./commitment');
+const { handleSetupFlow } = require('./setup');
+const { handleJudgeResponse, handleJudgeVerification } = require('./judge');
+const { handleUserClaim } = require('./daily');
 
-async function sendDailyClaim(userId, userPhone, timezone) {
-  const today = getTodayDate(timezone);
+async function twilioWebhook(req, res) {
+  const { From: phone, Body: message } = req.body;
   
-  const { data: existing } = await supabase
-    .from('daily_logs')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('date', today)
-    .single();
+  console.log(`📨 Received from ${phone}: ${message}`);
 
-  if (existing) return;
+  try {
+    // Priority: judge consent > judge verification > user claim > setup
+    
+    const judgeConsentHandled = await handleJudgeResponse(phone, message);
+    if (judgeConsentHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
 
-  await supabase.from('daily_logs').insert({
-    user_id: userId,
-    date: today,
-    outcome: 'pending'
-  });
+    const judgeVerificationHandled = await handleJudgeVerification(phone, message);
+    if (judgeVerificationHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
 
-  await sendSMS(userPhone, 'Did you complete today\'s commitment?\n\nReply YES or NO.');
+    const userClaimHandled = await handleUserClaim(phone, message);
+    if (userClaimHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
+
+    await handleSetupFlow(phone, message);
+    
+    res.status(200).send('<Response></Response>');
+  } catch (error) {
+    console.error('Error handling SMS:', error);
+    res.status(500).send('<Response></Response>');
+  }
 }
 
-function startDailyCronJobs() {
-  // Run every minute to check for 8pm in user timezones
-  cron.schedule('* * * * *', async () => {
-    const { data: activeUsers } = await supabase
-      .from('users')
-      .select('*')
-      .eq('status', 'active');
-
-    for (const user of activeUsers || []) {
-      const userHour = getUserHour(user.timezone);
-      
-      if (userHour === 20) { // 8pm
-        await sendDailyClaim(user.id, user.phone, user.timezone);
-      }
-
-      // Check if commitment ended
-      const endDate = new Date(user.commitment_end_date);
-      if (new Date() >= endDate) {
-        await endCommitment(user.id, 'time_completed');
-      }
-    }
-  });
-
-  // 10pm - handle no-response from users (treat as NO)
-  cron.schedule('0 22 * * *', async () => {
-    const today = new Date().toISOString().split('T')[0];
-    
-    const { data: pendingLogs } = await supabase
-      .from('daily_logs')
-      .select('*, users(*)')
-      .eq('date', today)
-      .eq('outcome', 'pending')
-      .is('user_claimed', null);
-
-    for (const log of pendingLogs || []) {
-      await handleFailure(log.users, log);
-    }
-  });
-
-  // 11pm - handle no-response from judges (default to PASS)
-  cron.schedule('0 23 * * *', async () => {
-    const today = new Date().toISOString().split('T')[0];
-    
-    const { data: pendingLogs } = await supabase
-      .from('daily_logs')
-      .select('*, users(*)')
-      .eq('date', today)
-      .eq('outcome', 'pending')
-      .eq('user_claimed', true)
-      .is('judge_verified', null);
-
-    for (const log of pendingLogs || []) {
-      await supabase
-        .from('daily_logs')
-        .update({
-          judge_verified: true,
-          outcome: 'pass'
-        })
-        .eq('id', log.id);
-
-      await sendSMS(log.users.phone, 'Judge did not respond. Day marked as PASS.');
-    }
-  });
-
-  console.log('⏰ Cron jobs started');
-}
-
-module.exports = { startDailyCronJobs, sendDailyClaim };
-
-// ============================================================================
-// FILE: src/handlers/twilio-webhook.js
-// ============================================================================
+module.exports = twilioWebhook;
