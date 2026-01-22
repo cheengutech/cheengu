@@ -33,7 +33,17 @@ app.get('/health', (req, res) => {
 
 // Start cron jobs
 startDailyCronJobs();
-
+// Add this before the "Start server" line
+app.get('/test-db', async (req, res) => {
+    const { supabase } = require('./src/config/database');
+    try {
+      const { data, error } = await supabase.from('users').select('count');
+      if (error) throw error;
+      res.json({ status: 'ok', message: 'Database connected' });
+    } catch (error) {
+      res.status(500).json({ status: 'error', message: error.message });
+    }
+  });
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
