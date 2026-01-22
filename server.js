@@ -49,6 +49,33 @@ app.get('/test-db', async (req, res) => {
   }
 });
 
+// Manual trigger for daily check-in (for testing)
+app.get('/test-daily-checkin/:phone', async (req, res) => {
+  const { sendDailyClaim } = require('./src/services/scheduler');
+  const { supabase } = require('./src/config/database');
+  const { normalizePhone } = require('./src/utils/phone');
+  
+  try {
+    const phone = normalizePhone(req.params.phone);
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', phone)
+      .eq('status', 'active')
+      .single();
+    
+    if (!user) {
+      return res.status(404).json({ error: 'No active user found with that phone' });
+    }
+    
+    await sendDailyClaim(user.id, user.phone, user.timezone);
+    res.json({ status: 'ok', message: 'Daily check-in sent!' });
+  } catch (error) {
+    console.error('Error triggering daily check-in:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start cron jobs
 startDailyCronJobs();
 
