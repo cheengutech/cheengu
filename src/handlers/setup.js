@@ -67,7 +67,16 @@ async function handleSetupFlow(phone, message) {
       await sendSMS(normalizedPhone, "You can't be your own judge. Please provide someone else's phone number.");
       return;
     }
-
+    
+    if (!judgePhone || !judgePhone.startsWith('+') || judgePhone.length < 11) {
+        await sendSMS(
+          normalizedPhone,
+          "That doesn't look like a valid phone number. Please include the area code."
+        );
+        return;
+      }
+      
+      
     // Create Stripe payment intent
     const paymentIntent = await stripe.paymentIntents.create({
       amount: INITIAL_STAKE * 100,
