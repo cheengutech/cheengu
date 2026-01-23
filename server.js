@@ -79,6 +79,18 @@ app.get('/test-daily-checkin/:phone', async (req, res) => {
 // Start cron jobs
 startDailyCronJobs();
 
+// Keep server alive - ping every 14 minutes to prevent Render spindown
+if (process.env.NODE_ENV === 'production') {
+  const https = require('https');
+  setInterval(() => {
+    https.get(process.env.APP_URL + '/health', (res) => {
+      console.log('🏓 Keep-alive ping');
+    }).on('error', (err) => {
+      console.error('Keep-alive ping failed:', err);
+    });
+  }, 14 * 60 * 1000); // Every 14 minutes
+}
+
 // Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
