@@ -29,6 +29,18 @@ async function sendDailyClaim(userId, userPhone, timezone) {
 
   console.log(`📝 Creating new daily log for ${today}`);
   
+  // Get user info to find judge
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (!user) {
+    console.error('❌ User not found');
+    return;
+  }
+  
   const { data: newLog, error: insertError } = await supabase
     .from('daily_logs')
     .insert({
@@ -46,7 +58,12 @@ async function sendDailyClaim(userId, userPhone, timezone) {
 
   console.log(`✅ Daily log created:`, newLog);
 
-  await sendSMS(userPhone, 'Did you complete today\'s commitment?\n\nReply YES or NO.');
+  // NEW: Ask judge directly instead of user
+  console.log(`📤 Sending check-in to judge: ${user.judge_phone}`);
+  await sendSMS(
+    user.judge_phone, 
+    `Did ${userPhone} complete today's commitment (${user.commitment_text})?\n\nReply YES or NO.`
+  );
 }
 
 function startDailyCronJobs() {
