@@ -9,20 +9,42 @@ const { handleFailure, endCommitment } = require('./commitment');
 async function sendDailyClaim(userId, userPhone, timezone) {
   const today = getTodayDate(timezone);
   
-  const { data: existing } = await supabase
+  console.log(`🔍 Checking for existing log for user ${userId} on ${today}`);
+  
+  const { data: existing, error: checkError } = await supabase
     .from('daily_logs')
     .select('*')
     .eq('user_id', userId)
     .eq('date', today)
     .single();
 
-  if (existing) return;
+  if (checkError && checkError.code !== 'PGRST116') {
+    console.error('❌ Error checking existing log:', checkError);
+  }
 
-  await supabase.from('daily_logs').insert({
-    user_id: userId,
-    date: today,
-    outcome: 'pending'
-  });
+  if (existing) {
+    console.log(`⚠️ Log already exists for ${today}, skipping`);
+    return;
+  }
+
+  console.log(`📝 Creating new daily log for ${today}`);
+  
+  const { data: newLog, error: insertError } = await supabase
+    .from('daily_logs')
+    .insert({
+      user_id: userId,
+      date: today,
+      outcome: 'pending'
+    })
+    .select()
+    .single();
+
+  if (insertError) {
+    console.error('❌ Failed to create daily log:', insertError);
+    return;
+  }
+
+  console.log(`✅ Daily log created:`, newLog);
 
   await sendSMS(userPhone, 'Did you complete today\'s commitment?\n\nReply YES or NO.');
 }
