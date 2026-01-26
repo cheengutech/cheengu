@@ -24,7 +24,9 @@ async function handleUserClaim(phone, message) {
 
   console.log('✅ Active user found:', user.id);
 
-  const today = new Date().toISOString().split('T')[0];
+  const { getTodayDate } = require('../utils/timezone');
+  const today = getTodayDate(user.timezone);
+  console.log('📅 Looking for log with date:', today, 'in timezone:', user.timezone);
   
   const { data: log } = await supabase
     .from('daily_logs')
