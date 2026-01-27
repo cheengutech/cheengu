@@ -51,7 +51,7 @@ app.get('/test-db', async (req, res) => {
 
 // Manual trigger for daily check-in (for testing)
 app.get('/test-daily-checkin/:phone', async (req, res) => {
-  const { sendDailyClaim } = require('./src/services/scheduler');
+  const { sendDailyCheckIn, sendDeadlineCheckIn } = require('./src/services/scheduler');
   const { supabase } = require('./src/config/database');
   const { normalizePhone } = require('./src/utils/phone');
   
@@ -68,10 +68,27 @@ app.get('/test-daily-checkin/:phone', async (req, res) => {
       return res.status(404).json({ error: 'No active user found with that phone' });
     }
     
-    await sendDailyClaim(user.id, user.phone, user.timezone);
-    res.json({ status: 'ok', message: 'Daily check-in sent!' });
+    if (user.commitment_type === 'daily') {
+      await sendDailyCheckIn(
+        user.id, 
+        user.phone, 
+        user.judge_phone,
+        user.commitment_text,
+        user.timezone
+      );
+      res.json({ status: 'ok', message: 'Daily check-in sent!', type: 'daily' });
+    } else {
+      await sendDeadlineCheckIn(
+        user.id,
+        user.phone,
+        user.judge_phone,
+        user.commitment_text,
+        user.deadline_date
+      );
+      res.json({ status: 'ok', message: 'Deadline check-in sent!', type: 'deadline' });
+    }
   } catch (error) {
-    console.error('Error triggering daily check-in:', error);
+    console.error('Error triggering check-in:', error);
     res.status(500).json({ error: error.message });
   }
 });

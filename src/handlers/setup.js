@@ -57,7 +57,7 @@ async function handleSetupFlow(phone, message) {
       return;
     }
     
-    await sendSMS(normalizedPhone, "What's your fitness commitment for this week?");
+    await sendSMS(normalizedPhone, "What's your commitment?\n\n(Example: 'Do 50 pushups every day' or 'Launch landing page by Feb 1')");
     return;
   }
 
@@ -70,15 +70,80 @@ async function handleSetupFlow(phone, message) {
   // Handle setup steps
   if (setupState.current_step === 'awaiting_commitment') {
     console.log('📋 Processing commitment:', message);
-    const { error: updateError } = await supabase
+    await supabase
       .from('setup_state')
       .update({
         temp_commitment: message,
-        current_step: 'awaiting_judge_phone'
+        current_step: 'awaiting_commitment_type'
       })
       .eq('phone', normalizedPhone);
     
-    console.log('✅ Updated to awaiting_judge_phone', updateError);
+    console.log('✅ Updated to awaiting_commitment_type');
+    
+    await sendSMS(
+      normalizedPhone, 
+      'Is this a DAILY habit or a DEADLINE goal?\n\nReply DAILY if you need to do it every day.\nReply DEADLINE if you need to complete it by a specific date.'
+    );
+    return;
+  }
+
+  if (setupState.current_step === 'awaiting_commitment_type') {
+    const response = message.toUpperCase();
+    
+    if (response !== 'DAILY' && response !== 'DEADLINE') {
+      await sendSMS(normalizedPhone, 'Please reply DAILY or DEADLINE.');
+      return;
+    }
+
+    console.log('📅 Commitment type selected:', response);
+
+    if (response === 'DAILY') {
+      await supabase
+        .from('setup_state')
+        .update({
+          temp_commitment_type: 'daily',
+          current_step: 'awaiting_judge_phone'
+        })
+        .eq('phone', normalizedPhone);
+      
+      await sendSMS(normalizedPhone, "What's your judge's phone number? (Include area code)");
+      return;
+    } else {
+      // DEADLINE type
+      await supabase
+        .from('setup_state')
+        .update({
+          temp_commitment_type: 'deadline',
+          current_step: 'awaiting_deadline_date'
+        })
+        .eq('phone', normalizedPhone);
+      
+      await sendSMS(
+        normalizedPhone, 
+        "When's your deadline?\n\nReply with a date like: Jan 31, 2/15, or next Friday"
+      );
+      return;
+    }
+  }
+
+  if (setupState.current_step === 'awaiting_deadline_date') {
+    console.log('📆 Processing deadline date:', message);
+    
+    // Parse date (simple parsing - can be enhanced)
+    const parsedDate = parseDeadlineDate(message);
+    
+    if (!parsedDate) {
+      await sendSMS(normalizedPhone, 'Could not understand that date. Please try: Jan 31, 2/15, or next Friday');
+      return;
+    }
+
+    await supabase
+      .from('setup_state')
+      .update({
+        temp_deadline_date: parsedDate,
+        current_step: 'awaiting_judge_phone'
+      })
+      .eq('phone', normalizedPhone);
     
     await sendSMS(normalizedPhone, "What's your judge's phone number? (Include area code)");
     return;
@@ -97,20 +162,21 @@ async function handleSetupFlow(phone, message) {
     console.log('💳 Creating Stripe payment intent');
     
     try {
-      // Create Stripe payment intent
       const paymentIntent = await stripe.paymentIntents.create({
         amount: INITIAL_STAKE * 100,
         currency: 'usd',
         metadata: {
           phone: normalizedPhone,
           commitment: setupState.temp_commitment,
+          commitment_type: setupState.temp_commitment_type,
+          deadline_date: setupState.temp_deadline_date || '',
           judge_phone: judgePhone
         }
       });
 
       console.log('✅ Payment intent created:', paymentIntent.id);
 
-      const { error: updateError } = await supabase
+      await supabase
         .from('setup_state')
         .update({
           temp_judge_phone: judgePhone,
@@ -118,7 +184,7 @@ async function handleSetupFlow(phone, message) {
         })
         .eq('phone', normalizedPhone);
 
-      console.log('✅ Updated to awaiting_payment', updateError);
+      console.log('✅ Updated to awaiting_payment');
 
       const paymentLink = `${process.env.APP_URL}/pay/${paymentIntent.id}`;
       console.log('🔗 Payment link:', paymentLink);
@@ -135,6 +201,34 @@ async function handleSetupFlow(phone, message) {
   }
   
   console.log('⚠️ Unexpected state:', setupState.current_step);
+}
+
+// Simple date parser
+function parseDeadlineDate(input) {
+  const cleaned = input.trim().toLowerCase();
+  const now = new Date();
+  
+  // Handle "next [day]"
+  if (cleaned.includes('next')) {
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const day = days.find(d => cleaned.includes(d));
+    if (day) {
+      const targetDay = days.indexOf(day);
+      const currentDay = now.getDay();
+      const daysUntil = (targetDay + 7 - currentDay) % 7 || 7;
+      const date = new Date(now);
+      date.setDate(date.getDate() + daysUntil);
+      return date.toISOString().split('T')[0];
+    }
+  }
+  
+  // Try parsing as date
+  const parsed = new Date(input);
+  if (!isNaN(parsed.getTime()) && parsed > now) {
+    return parsed.toISOString().split('T')[0];
+  }
+  
+  return null;
 }
 
 module.exports = { handleSetupFlow };
