@@ -57,7 +57,7 @@ async function handleSetupFlow(phone, message) {
       return;
     }
     
-    await sendSMS(normalizedPhone, "What's your commitment?\n\n(Example: 'Do 50 pushups every day' or 'Launch landing page by Feb 1')");
+    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"");
     return;
   }
 
@@ -82,7 +82,7 @@ async function handleSetupFlow(phone, message) {
     
     await sendSMS(
       normalizedPhone, 
-      'Is this a DAILY habit or a DEADLINE goal?\n\nReply DAILY if you need to do it every day.\nReply DEADLINE if you need to complete it by a specific date.'
+      `Got it: "${message}"\n\nNow choose your accountability style:\n\n• Reply DAILY if you need to do this every single day (you'll get checked daily)\n\n• Reply DEADLINE if you need to complete this by a specific date (you'll get checked once at the end)\n\nWhich works better for your goal?`
     );
     return;
   }
@@ -91,7 +91,7 @@ async function handleSetupFlow(phone, message) {
     const response = message.toUpperCase();
     
     if (response !== 'DAILY' && response !== 'DEADLINE') {
-      await sendSMS(normalizedPhone, 'Please reply DAILY or DEADLINE.');
+      await sendSMS(normalizedPhone, 'Please reply with either DAILY or DEADLINE.');
       return;
     }
 
@@ -102,11 +102,14 @@ async function handleSetupFlow(phone, message) {
         .from('setup_state')
         .update({
           temp_commitment_type: 'daily',
-          current_step: 'awaiting_judge_phone'
+          current_step: 'awaiting_duration'
         })
         .eq('phone', normalizedPhone);
       
-      await sendSMS(normalizedPhone, "What's your judge's phone number? (Include area code)");
+      await sendSMS(
+        normalizedPhone, 
+        `Perfect! Daily check-ins it is.\n\nYour judge will verify every day at 8pm. Each missed day = -$5 from your $20 stake.\n\nHow many days? Reply with a number (Example: 7 for one week, 30 for one month)`
+      );
       return;
     } else {
       // DEADLINE type
@@ -120,10 +123,35 @@ async function handleSetupFlow(phone, message) {
       
       await sendSMS(
         normalizedPhone, 
-        "When's your deadline?\n\nReply with a date like: Jan 31, 2/15, or next Friday"
+        `Perfect! One final check-in at your deadline.\n\nYour judge will verify on that date. If you didn't complete it, you lose the full $20 stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
       );
       return;
     }
+  }
+
+  if (setupState.current_step === 'awaiting_duration') {
+    const days = parseInt(message);
+    
+    if (isNaN(days) || days < 1 || days > 90) {
+      await sendSMS(normalizedPhone, 'Please enter a number between 1 and 90 days.');
+      return;
+    }
+
+    console.log('📆 Duration set:', days, 'days');
+    
+    await supabase
+      .from('setup_state')
+      .update({
+        temp_deadline_date: days.toString(), // Store as string, will calculate actual end date later
+        current_step: 'awaiting_judge_phone'
+      })
+      .eq('phone', normalizedPhone);
+    
+    await sendSMS(
+      normalizedPhone, 
+      `${days} days of daily check-ins. Got it!\n\nNow, who's your accountability judge? They'll verify your progress.\n\nSend their phone number (include area code):`
+    );
+    return;
   }
 
   if (setupState.current_step === 'awaiting_deadline_date') {
