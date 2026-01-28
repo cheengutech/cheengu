@@ -136,8 +136,7 @@ function startDailyCronJobs() {
     }
   });
 
-  // 10pm - handle no-response from users for DAILY (treat as NO)
-  // Note: DEADLINE commitments don't have daily check-ins, so this doesn't apply
+  // 10pm - send FIRST reminder to judges who haven't responded (2 hours after initial)
   cron.schedule('0 22 * * *', async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
@@ -147,28 +146,57 @@ function startDailyCronJobs() {
         .select('*, users(*)')
         .eq('date', today)
         .eq('outcome', 'pending')
-        .is('user_claimed', null);
+        .is('judge_verified', null);
 
       for (const log of pendingLogs || []) {
-        // Only for daily commitments
-        if (log.users.commitment_type === 'daily') {
-          await handleFailure(log.users, log);
-        }
+        await sendSMS(
+          log.users.judge_phone,
+          `Reminder: Did ${log.users.phone} complete today's commitment?\n\nReply YES or NO.`
+        );
+        console.log(`⏰ Sent 1st reminder to judge: ${log.users.judge_phone}`);
       }
     } catch (error) {
-      console.error('Error in 10pm cron job:', error);
+      console.error('Error in 10pm reminder job:', error);
     }
   });
 
-  // 11pm - handle no-response from judges (default to PASS)
-  cron.schedule('0 23 * * *', async () => {
+  // 12am (midnight) - send SECOND reminder to judges who still haven't responded
+  cron.schedule('0 0 * * *', async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayDate = yesterday.toISOString().split('T')[0];
       
       const { data: pendingLogs } = await supabase
         .from('daily_logs')
         .select('*, users(*)')
-        .eq('date', today)
+        .eq('date', yesterdayDate)
+        .eq('outcome', 'pending')
+        .is('judge_verified', null);
+
+      for (const log of pendingLogs || []) {
+        await sendSMS(
+          log.users.judge_phone,
+          `Final reminder: Did ${log.users.phone} complete yesterday's commitment?\n\nReply YES or NO. Auto-PASS in 2 hours if no response.`
+        );
+        console.log(`⏰ Sent 2nd reminder to judge: ${log.users.judge_phone}`);
+      }
+    } catch (error) {
+      console.error('Error in midnight reminder job:', error);
+    }
+  });
+
+  // 2am - handle no-response from judges after TWO reminders (default to PASS)
+  cron.schedule('0 2 * * *', async () => {
+    try {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayDate = yesterday.toISOString().split('T')[0];
+      
+      const { data: pendingLogs } = await supabase
+        .from('daily_logs')
+        .select('*, users(*)')
+        .eq('date', yesterdayDate)
         .eq('outcome', 'pending')
         .is('judge_verified', null);
 
@@ -182,14 +210,15 @@ function startDailyCronJobs() {
           .eq('id', log.id);
 
         if (log.users.commitment_type === 'daily') {
-          await sendSMS(log.users.phone, 'Judge did not respond. Day marked as PASS.');
+          await sendSMS(log.users.phone, 'Judge did not respond after 2 reminders. Day marked as PASS.');
         } else {
-          // Deadline - no response = PASS (benefit of doubt)
-          await sendSMS(log.users.phone, 'Judge did not respond. Commitment marked as PASS.');
+          await sendSMS(log.users.phone, 'Judge did not respond after 2 reminders. Commitment marked as PASS.');
         }
+        
+        console.log(`✅ Auto-PASS after 2 reminders (no judge response): ${log.users.phone}`);
       }
     } catch (error) {
-      console.error('Error in 11pm cron job:', error);
+      console.error('Error in 2am auto-pass job:', error);
     }
   });
 
