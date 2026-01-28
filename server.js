@@ -93,6 +93,22 @@ app.get('/test-daily-checkin/:phone', async (req, res) => {
   }
 });
 
+// Temporary: manually trigger setup finalization
+app.get('/manual-finalize/:phone', async (req, res) => {
+  const { finalizeSetup } = require('./src/handlers/payment');
+  const { normalizePhone } = require('./src/utils/phone');
+  
+  try {
+    const phone = normalizePhone(req.params.phone);
+    console.log('🔧 Manual finalize triggered for:', phone);
+    await finalizeSetup(phone);
+    res.json({ status: 'ok', message: 'Setup finalized! Judge should receive consent request.' });
+  } catch (error) {
+    console.error('❌ Manual finalize error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Start cron jobs
 startDailyCronJobs();
 
