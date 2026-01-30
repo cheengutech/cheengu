@@ -1,8 +1,7 @@
-// src/handlers/judge.js
+// ============================================================================
+// FILE: src/handlers/judge.js
+// ============================================================================
 
-const { supabase } = require('../config/database');
-const { sendSMS } = require('../services/sms');
-const { normalizePhone, isValidYesNo } = require('../utils/phone');
 const { handleFailure } = require('../services/commitment');
 
 async function handleJudgeResponse(phone, message) {
@@ -17,7 +16,8 @@ async function handleJudgeResponse(phone, message) {
 
   if (!judge) return false;
 
-  if (message.toUpperCase() === 'YES') {
+  // Case-insensitive check with trim
+  if (message.trim().toUpperCase() === 'YES') {
     await supabase
       .from('judges')
       .update({ consent_status: 'accepted' })
@@ -85,10 +85,11 @@ async function handleJudgeVerification(phone, message) {
     return true;
   }
 
-  const verified = message.toUpperCase() === 'YES';
+  const verified = message.trim().toUpperCase() === 'YES';
   console.log('✅ Judge verified:', verified);
 
   if (verified) {
+    // PASS
     await supabase
       .from('daily_logs')
       .update({
@@ -99,9 +100,12 @@ async function handleJudgeVerification(phone, message) {
 
     await sendSMS(judge.users.phone, 'Day marked as PASS.');
   } else {
+    // FAIL
     if (judge.users.commitment_type === 'deadline') {
+      // All-or-nothing for deadline
       await handleDeadlineFailure(judge.users);
     } else {
+      // Gradual for daily
       await handleFailure(judge.users, log);
     }
   }
@@ -110,6 +114,7 @@ async function handleJudgeVerification(phone, message) {
 }
 
 async function handleDeadlineFailure(user) {
+  // All-or-nothing: lose entire stake
   await supabase
     .from('users')
     .update({ 
@@ -118,6 +123,7 @@ async function handleDeadlineFailure(user) {
     })
     .eq('id', user.id);
 
+  // Record payout to judge
   await supabase.from('payouts').insert({
     judge_phone: user.judge_phone,
     amount: user.stake_remaining,
@@ -130,3 +136,15 @@ async function handleDeadlineFailure(user) {
 }
 
 module.exports = { handleJudgeResponse, handleJudgeVerification };
+
+// ============================================================================
+// FILE: src/handlers/daily.js (Keep for reference, but not used anymore)
+// ============================================================================
+
+async function handleUserClaim(phone, message) {
+  // This function is no longer used with judge-only flow
+  // Kept for backwards compatibility
+  return false;
+}
+
+module.exports = { handleUserClaim };
