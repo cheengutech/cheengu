@@ -1,8 +1,28 @@
-// ============================================================================
-// FILE: src/handlers/judge.js
-// ============================================================================
+// src/handlers/judge.js
 
+const supabase = require('../config/database');
+const { sendSMS } = require('../services/sms');
 const { handleFailure } = require('../services/commitment');
+const { getTodayDate } = require('../utils/timezone');
+
+function normalizePhone(phone) {
+  // Remove all non-digits
+  const digits = phone.replace(/\D/g, '');
+  // Add +1 if it's a 10-digit US number
+  if (digits.length === 10) {
+    return '+1' + digits;
+  }
+  // Add + if missing
+  if (!phone.startsWith('+')) {
+    return '+' + digits;
+  }
+  return phone;
+}
+
+function isValidYesNo(message) {
+  const normalized = message.trim().toUpperCase();
+  return normalized === 'YES' || normalized === 'NO';
+}
 
 async function handleJudgeResponse(phone, message) {
   const normalizedPhone = normalizePhone(phone);
@@ -59,7 +79,6 @@ async function handleJudgeVerification(phone, message) {
     return false;
   }
 
-  const { getTodayDate } = require('../utils/timezone');
   const today = getTodayDate(judge.users.timezone);
   
   console.log('📅 Looking for pending log on date:', today);
@@ -136,15 +155,3 @@ async function handleDeadlineFailure(user) {
 }
 
 module.exports = { handleJudgeResponse, handleJudgeVerification };
-
-// ============================================================================
-// FILE: src/handlers/daily.js (Keep for reference, but not used anymore)
-// ============================================================================
-
-async function handleUserClaim(phone, message) {
-  // This function is no longer used with judge-only flow
-  // Kept for backwards compatibility
-  return false;
-}
-
-module.exports = { handleUserClaim };
