@@ -1,6 +1,6 @@
 // src/handlers/judge.js
 
-const supabase = require('../config/database');
+const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { handleFailure } = require('../services/commitment');
 const { getTodayDate } = require('../utils/timezone');
