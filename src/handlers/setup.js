@@ -3,7 +3,7 @@
 const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { normalizePhone } = require('../utils/phone');
-const { stripe, INITIAL_STAKE } = require('../config/stripe');
+const { stripe } = require('../config/stripe');
 
 async function handleSetupFlow(phone, message) {
   console.log('🔧 handleSetupFlow called with:', phone, message);
@@ -97,36 +97,57 @@ async function handleSetupFlow(phone, message) {
 
     console.log('📅 Commitment type selected:', response);
 
-    if (response === 'DAILY') {
-      await supabase
-        .from('setup_state')
-        .update({
-          temp_commitment_type: 'daily',
-          current_step: 'awaiting_duration'
-        })
-        .eq('phone', normalizedPhone);
-      
-      await sendSMS(
-        normalizedPhone, 
-        `Perfect! Daily check-ins it is.\n\nYour judge will verify every day at 8pm. Each missed day = -$5 from your $20 stake.\n\nHow many days? Reply with a number (Example: 7 for one week, 30 for one month)`
-      );
-      return;
-    } else {
-      // DEADLINE type
-      await supabase
-        .from('setup_state')
-        .update({
-          temp_commitment_type: 'deadline',
-          current_step: 'awaiting_deadline_date'
-        })
-        .eq('phone', normalizedPhone);
-      
-      await sendSMS(
-        normalizedPhone, 
-        `Perfect! One final check-in at your deadline.\n\nYour judge will verify on that date. If you didn't complete it, you lose the full $20 stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
-      );
+    // NEW: Ask for stake amount before duration/deadline
+    await supabase
+      .from('setup_state')
+      .update({
+        temp_commitment_type: response.toLowerCase(),
+        current_step: 'awaiting_stake_amount'
+      })
+      .eq('phone', normalizedPhone);
+    
+    await sendSMS(
+      normalizedPhone, 
+      `Perfect! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} it is.\n\nHow much do you want to stake?\n\nReply with:\n• 5 ($5)\n• 10 ($10)\n• 20 ($20)\n• 50 ($50)\n• Or enter any amount between $5-$500`
+    );
+    return;
+  }
+
+  // NEW: Handle stake amount selection
+  if (setupState.current_step === 'awaiting_stake_amount') {
+    const stakeAmount = parseInt(message);
+    
+    if (isNaN(stakeAmount) || stakeAmount < 5 || stakeAmount > 500) {
+      await sendSMS(normalizedPhone, 'Please enter an amount between $5 and $500.');
       return;
     }
+
+    console.log('💰 Stake amount selected:', stakeAmount);
+
+    // Calculate penalty (20% of stake or $5 minimum)
+    const penalty = Math.max(5, Math.round(stakeAmount * 0.2));
+    
+    await supabase
+      .from('setup_state')
+      .update({
+        temp_stake_amount: stakeAmount,
+        temp_penalty_amount: penalty,
+        current_step: setupState.temp_commitment_type === 'daily' ? 'awaiting_duration' : 'awaiting_deadline_date'
+      })
+      .eq('phone', normalizedPhone);
+
+    if (setupState.temp_commitment_type === 'daily') {
+      await sendSMS(
+        normalizedPhone, 
+        `Got it - $${stakeAmount} stake.\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? Reply with a number (Example: 7 for one week, 30 for one month)`
+      );
+    } else {
+      await sendSMS(
+        normalizedPhone, 
+        `Got it - $${stakeAmount} stake.\n\nYour judge will verify on the deadline. If you didn't complete it, you lose the full $${stakeAmount} stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
+      );
+    }
+    return;
   }
 
   if (setupState.current_step === 'awaiting_duration') {
@@ -189,16 +210,22 @@ async function handleSetupFlow(phone, message) {
 
     console.log('💳 Creating Stripe payment intent');
     
+    // Get stake amount from setup state (defaults to 20 if not set)
+    const stakeAmount = setupState.temp_stake_amount || 20;
+    const penaltyAmount = setupState.temp_penalty_amount || 5;
+    
     try {
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: INITIAL_STAKE * 100,
+        amount: stakeAmount * 100, // Convert to cents
         currency: 'usd',
         metadata: {
           phone: normalizedPhone,
           commitment: setupState.temp_commitment,
           commitment_type: setupState.temp_commitment_type,
           deadline_date: setupState.temp_deadline_date || '',
-          judge_phone: judgePhone
+          judge_phone: judgePhone,
+          stake_amount: stakeAmount.toString(),
+          penalty_amount: penaltyAmount.toString()
         }
       });
 
@@ -219,7 +246,7 @@ async function handleSetupFlow(phone, message) {
       
       await sendSMS(
         normalizedPhone,
-        `You'll stake $${INITIAL_STAKE}. Pay here: ${paymentLink}\n\nAfter payment, your judge will be contacted.`
+        `You'll stake $${stakeAmount}. Pay here: ${paymentLink}\n\nAfter payment, your judge will be contacted.`
       );
     } catch (stripeError) {
       console.error('❌ Stripe error:', stripeError);
