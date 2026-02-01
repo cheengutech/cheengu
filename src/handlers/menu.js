@@ -32,43 +32,43 @@ async function handleMenuCommand(judgePhone) {
   const timezone = judges[0].users.timezone || 'America/Los_Angeles';
   const today = getTodayDate(timezone);
 
-  // Find pending verifications for today
-  const pendingVerifications = [];
+  // Find all users with active commitments for today
+  const availableVerifications = [];
   
   for (const judge of judges) {
     const user = judge.users;
     
-    // Check if user is active
+    // Check if user is active and commitment is DAILY type
     if (user.status !== 'active') continue;
+    if (user.commitment_type !== 'daily') continue; // Only daily commitments for now
 
-    // Check if there's a daily log for today that's pending
-    const { data: log } = await supabase
+    // Check if there's already a log for today
+    const { data: existingLog } = await supabase
       .from('daily_logs')
       .select('*')
       .eq('user_id', user.id)
       .eq('date', today)
-      .eq('outcome', 'pending')
       .single();
 
-    // Only include if log exists and pending
-    if (log) {
-      const userName = user.phone.slice(-4); // Last 4 digits as identifier
-      
-      pendingVerifications.push({
-        logId: log.id,
-        userId: user.id,
-        userPhone: user.phone,
-        userName: userName,
-        commitmentText: user.commitment_text,
-        commitmentType: user.commitment_type,
-        userClaimed: log.user_claimed
-      });
-    }
+    // If log exists and already verified, skip
+    if (existingLog && existingLog.outcome !== 'pending') continue;
+
+    const userName = user.phone.slice(-4); // Last 4 digits as identifier
+    
+    availableVerifications.push({
+      logId: existingLog?.id || null, // May not exist yet
+      userId: user.id,
+      userPhone: user.phone,
+      userName: userName,
+      commitmentText: user.commitment_text,
+      commitmentType: user.commitment_type,
+      hasExistingLog: !!existingLog
+    });
   }
 
-  // If nothing pending
-  if (pendingVerifications.length === 0) {
-    await sendSMS(judgePhone, "No pending verifications today.\nAll caught up! ✓");
+  // If nothing available
+  if (availableVerifications.length === 0) {
+    await sendSMS(judgePhone, "No active commitments for today.\nAll caught up! ✓");
     return;
   }
 
@@ -80,7 +80,7 @@ async function handleMenuCommand(judgePhone) {
     .from('judge_menu_sessions')
     .insert({
       judge_phone: judgePhone,
-      pending_verifications: pendingVerifications,
+      pending_verifications: availableVerifications,
       active: true,
       expires_at: expiresAt.toISOString()
     })
@@ -96,8 +96,8 @@ async function handleMenuCommand(judgePhone) {
   // Build menu message
   let menuMessage = '';
   
-  if (pendingVerifications.length === 1) {
-    const item = pendingVerifications[0];
+  if (availableVerifications.length === 1) {
+    const item = availableVerifications[0];
     
     menuMessage = `📋 MENU - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}\n\n`;
     menuMessage += `User ${item.userName}\n`;
@@ -106,9 +106,9 @@ async function handleMenuCommand(judgePhone) {
     menuMessage += `1 - Completed ✓\n`;
     menuMessage += `2 - Failed ✗`;
   } else {
-    menuMessage = `📋 MENU - Pending verifications:\n\n`;
+    menuMessage = `📋 MENU - Active commitments today:\n\n`;
     
-    pendingVerifications.forEach((item, index) => {
+    availableVerifications.forEach((item, index) => {
       const optionNum = (index * 2) + 1;
       menuMessage += `User ${item.userName} - ${item.commitmentText}\n`;
       menuMessage += `${optionNum} - Completed ✓\n`;
@@ -150,14 +150,14 @@ async function handleMenuResponse(judgePhone, message) {
     return true; // Was a menu response, just invalid
   }
 
-  const pendingVerifications = session.pending_verifications;
+  const availableVerifications = session.pending_verifications;
 
   // Determine which verification and action
   let verification;
   let isSuccess;
 
-  if (pendingVerifications.length === 1) {
-    verification = pendingVerifications[0];
+  if (availableVerifications.length === 1) {
+    verification = availableVerifications[0];
     if (choice === 1) {
       isSuccess = true;
     } else if (choice === 2) {
@@ -169,7 +169,7 @@ async function handleMenuResponse(judgePhone, message) {
   } else {
     // Multiple verifications - odd numbers are completed, even are failed
     const verificationIndex = Math.floor((choice - 1) / 2);
-    verification = pendingVerifications[verificationIndex];
+    verification = availableVerifications[verificationIndex];
     
     if (!verification) {
       await sendSMS(judgePhone, "Invalid choice. Text MENU to see options again.");
@@ -179,19 +179,55 @@ async function handleMenuResponse(judgePhone, message) {
     isSuccess = (choice % 2 === 1);
   }
 
-  // Update daily_log with judge's response
-  const { error: updateError } = await supabase
-    .from('daily_logs')
-    .update({
-      judge_verified: true,
-      outcome: isSuccess ? 'pass' : 'fail'
-    })
-    .eq('id', verification.logId);
+  // Get today's date
+  const { getTodayDate } = require('../utils/timezone');
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', verification.userId)
+    .single();
 
-  if (updateError) {
-    console.error('Error updating daily log:', updateError);
-    await sendSMS(judgePhone, "Error processing verification. Please try again.");
-    return true;
+  const today = getTodayDate(user.timezone);
+
+  // Create or update daily_log
+  let logId = verification.logId;
+
+  if (!verification.hasExistingLog) {
+    // Create new log entry for early check-in
+    const { data: newLog, error: createError } = await supabase
+      .from('daily_logs')
+      .insert({
+        user_id: verification.userId,
+        date: today,
+        outcome: isSuccess ? 'pass' : 'fail',
+        judge_verified: true,
+        user_claimed: null // Judge marked it directly
+      })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error('Error creating daily log:', createError);
+      await sendSMS(judgePhone, "Error processing verification. Please try again.");
+      return true;
+    }
+
+    logId = newLog.id;
+  } else {
+    // Update existing log
+    const { error: updateError } = await supabase
+      .from('daily_logs')
+      .update({
+        judge_verified: true,
+        outcome: isSuccess ? 'pass' : 'fail'
+      })
+      .eq('id', verification.logId);
+
+    if (updateError) {
+      console.error('Error updating daily log:', updateError);
+      await sendSMS(judgePhone, "Error processing verification. Please try again.");
+      return true;
+    }
   }
 
   // Deactivate menu session
@@ -202,16 +238,10 @@ async function handleMenuResponse(judgePhone, message) {
 
   // If failed, trigger penalty logic
   if (!isSuccess) {
-    const { data: user } = await supabase
-      .from('users')
-      .select('*')
-      .eq('id', verification.userId)
-      .single();
-
     const { data: log } = await supabase
       .from('daily_logs')
       .select('*')
-      .eq('id', verification.logId)
+      .eq('id', logId)
       .single();
 
     if (user && log) {
@@ -220,7 +250,7 @@ async function handleMenuResponse(judgePhone, message) {
     }
   } else {
     // Success - just confirm
-    await sendSMS(verification.userPhone, `✓ Day marked as PASS.\n${verification.commitmentText}`);
+    await sendSMS(verification.userPhone, `✓ Day marked as PASS by your judge.\n${verification.commitmentText}\n${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`);
   }
 
   // Confirm to judge
