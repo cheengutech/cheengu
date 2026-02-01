@@ -1,7 +1,6 @@
-// src/handlers/twilio-webhook.js
-
 const { handleSetupFlow } = require('./setup');
 const { handleJudgeResponse, handleJudgeVerification } = require('./judge');
+const { handleMenuCommand, handleMenuResponse } = require('./menu'); // ADD THIS
 
 async function twilioWebhook(req, res) {
   const { From: phone, Body: message } = req.body;
@@ -9,10 +8,22 @@ async function twilioWebhook(req, res) {
   console.log(`📨 Received from ${phone}: ${message}`);
 
   try {
-    // Priority: judge consent > judge verification > setup
+    // Priority: judge consent > MENU > judge verification > setup
     
     const judgeConsentHandled = await handleJudgeResponse(phone, message);
     if (judgeConsentHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
+
+    // ADD THIS: Check for menu command
+    if (message.trim().toUpperCase() === 'MENU') {
+      await handleMenuCommand(phone);
+      return res.status(200).send('<Response></Response>');
+    }
+
+    // ADD THIS: Check if judge is in active menu session
+    const menuResponseHandled = await handleMenuResponse(phone, message);
+    if (menuResponseHandled) {
       return res.status(200).send('<Response></Response>');
     }
 
@@ -21,7 +32,6 @@ async function twilioWebhook(req, res) {
       return res.status(200).send('<Response></Response>');
     }
 
-    // If not a judge response, treat as setup flow
     await handleSetupFlow(phone, message);
     
     res.status(200).send('<Response></Response>');
