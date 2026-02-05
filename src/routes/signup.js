@@ -4,6 +4,9 @@
 const { sendSMS } = require('../services/sms');
 const { normalizePhone } = require('../utils/phone');
 
+
+console.log('BACKEND_API_KEY:', process.env.BACKEND_API_KEY);
+
 // Simple API key auth (add BACKEND_API_KEY to your .env)
 function verifyApiKey(req, res, next) {
   const authHeader = req.headers.authorization;
