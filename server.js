@@ -22,6 +22,12 @@ app.use(cors({
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
 
+app.use((req, res, next) => {
+  console.log('INCOMING:', req.method, req.path);
+  next();
+});
+
+
 // Routes
 app.post('/sms', twilioWebhook);
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
