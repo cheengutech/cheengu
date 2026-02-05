@@ -7,7 +7,7 @@ const { normalizePhone } = require('../utils/phone');
 // Simple API key auth (add BACKEND_API_KEY to your .env)
 function verifyApiKey(req, res, next) {
   const authHeader = req.headers.authorization;
-  const apiKey = process.env.BACKEND_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_BACKEND_API_KEY;
 
   if (!authHeader || authHeader !== `Bearer ${apiKey}`) {
     return res.status(401).json({ error: 'Unauthorized' });
