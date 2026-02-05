@@ -1,4 +1,6 @@
-// src/handlers/payment.js
+// ============================================================================
+// FILE: src/handlers/payment.js
+// ============================================================================
 
 const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
@@ -24,7 +26,7 @@ async function finalizeSetup(phone) {
     endDate = new Date(setupState.temp_deadline_date);
   } else {
     // Daily type - use the duration they specified
-    const durationDays = parseInt(setupState.temp_deadline_date) || 7;
+    const durationDays = parseInt(setupState.temp_deadline_date) || 7; // Default 7 if parse fails
     endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + durationDays);
   }

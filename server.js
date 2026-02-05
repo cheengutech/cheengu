@@ -8,6 +8,14 @@ const { stripe } = require('./src/config/stripe');
 
 const app = express();
 
+const cors = require('cors');
+
+app.use(cors({
+  origin: ['https://www.cheengu.com', 'https://cheengu.com'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 // Middleware
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static('public'));
