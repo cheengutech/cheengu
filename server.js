@@ -5,6 +5,8 @@ const twilioWebhook = require('./src/handlers/twilio-webhook');
 const stripeWebhook = require('./src/handlers/stripe-webhook');
 const { startDailyCronJobs } = require('./src/services/scheduler');
 const { stripe } = require('./src/config/stripe');
+const { triggerStart, verifyApiKey } = require('./src/routes/signup');
+
 
 const app = express();
 
@@ -23,6 +25,7 @@ app.use(express.static('public'));
 // Routes
 app.post('/sms', twilioWebhook);
 app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+app.post('/api/signup', verifyApiKey, triggerStart);
 
 // Serve payment page for any /pay/* route
 app.get('/pay/:paymentIntentId', (req, res) => {
