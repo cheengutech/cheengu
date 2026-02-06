@@ -13,7 +13,11 @@ const app = express();
 const cors = require('cors');
 
 app.use(cors({
-  origin: ['https://www.cheengu.com', 'https://cheengu.com'],
+  origin: [
+    'https://www.cheengu.com', 
+    'https://cheengu.com',
+    'https://cheengu-v1.onrender.com'  // ← ADD THIS
+  ],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
