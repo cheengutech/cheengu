@@ -22,18 +22,11 @@ function verifyApiKey(req, res, next) {
 
 async function triggerStart(req, res) {
   try {
-    console.log('📥 FULL REQUEST BODY:', JSON.stringify(req.body));
-    console.log('📥 HEADERS:', JSON.stringify(req.headers));
-    
     const { phone } = req.body;
-    
-    console.log('📱 EXTRACTED PHONE:', phone);
 
     if (!phone) {
-      console.log('❌ NO PHONE IN BODY!');
       return res.status(400).json({ error: 'Phone number required' });
     }
-    // ... rest of code
 
     const normalizedPhone = normalizePhone(phone);
 
