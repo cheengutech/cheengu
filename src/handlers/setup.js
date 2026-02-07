@@ -97,7 +97,7 @@ async function handleSetupFlow(phone, message) {
 
     console.log('📅 Commitment type selected:', response);
 
-    // NEW: Ask for stake amount before duration/deadline
+    // Ask for stake amount before duration/deadline
     await supabase
       .from('setup_state')
       .update({
@@ -108,14 +108,16 @@ async function handleSetupFlow(phone, message) {
     
     await sendSMS(
       normalizedPhone, 
-      `Perfect! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} it is.\n\nHow much do you want to stake?\n\nReply with:\n• 5 ($5)\n• 10 ($10)\n• 20 ($20)\n• 50 ($50)\n• Or enter any amount between $5-$500`
+      `Nice! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} locked in.\n\nLast step: pick your stake. What amount would actually motivate you to follow through?\n\nReply with any amount from $5 to $500:`
     );
     return;
   }
 
-  // NEW: Handle stake amount selection
+  // Handle stake amount selection
   if (setupState.current_step === 'awaiting_stake_amount') {
-    const stakeAmount = parseInt(message);
+    // Remove $ sign if present and parse
+    const cleanedMessage = message.replace('$', '').trim();
+    const stakeAmount = parseInt(cleanedMessage);
     
     if (isNaN(stakeAmount) || stakeAmount < 5 || stakeAmount > 500) {
       await sendSMS(normalizedPhone, 'Please enter an amount between $5 and $500.');
@@ -139,12 +141,12 @@ async function handleSetupFlow(phone, message) {
     if (setupState.temp_commitment_type === 'daily') {
       await sendSMS(
         normalizedPhone, 
-        `Got it - $${stakeAmount} stake.\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? Reply with a number (Example: 7 for one week, 30 for one month)`
+        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
       );
     } else {
       await sendSMS(
         normalizedPhone, 
-        `Got it - $${stakeAmount} stake.\n\nYour judge will verify on the deadline. If you didn't complete it, you lose the full $${stakeAmount} stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
+        `$${stakeAmount} it is! 💪\n\nYour judge will verify on the deadline. Miss it and you lose the full stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
       );
     }
     return;
@@ -163,14 +165,14 @@ async function handleSetupFlow(phone, message) {
     await supabase
       .from('setup_state')
       .update({
-        temp_deadline_date: days.toString(), // Store as string, will calculate actual end date later
+        temp_deadline_date: days.toString(),
         current_step: 'awaiting_judge_phone'
       })
       .eq('phone', normalizedPhone);
     
     await sendSMS(
       normalizedPhone, 
-      `${days} days of daily check-ins. Got it!\n\nNow, who's your accountability judge? They'll verify your progress.\n\nSend their phone number (include area code):`
+      `${days} days - locked in!\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`
     );
     return;
   }
@@ -178,11 +180,10 @@ async function handleSetupFlow(phone, message) {
   if (setupState.current_step === 'awaiting_deadline_date') {
     console.log('📆 Processing deadline date:', message);
     
-    // Parse date (simple parsing - can be enhanced)
     const parsedDate = parseDeadlineDate(message);
     
     if (!parsedDate) {
-      await sendSMS(normalizedPhone, 'Could not understand that date. Please try: Jan 31, 2/15, or next Friday');
+      await sendSMS(normalizedPhone, 'Hmm, couldn\'t understand that date. Try something like: Jan 31, 2/15, or next Friday');
       return;
     }
 
@@ -194,7 +195,7 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
     
-    await sendSMS(normalizedPhone, "What's your judge's phone number? (Include area code)");
+    await sendSMS(normalizedPhone, `Deadline set! 📅\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`);
     return;
   }
 
@@ -204,19 +205,18 @@ async function handleSetupFlow(phone, message) {
     
     if (judgePhone === normalizedPhone) {
       console.log('⚠️ User tried to be their own judge');
-      await sendSMS(normalizedPhone, "You can't be your own judge. Please provide someone else's phone number.");
+      await sendSMS(normalizedPhone, "Nice try 😄 You can't be your own judge. Who else can hold you accountable?");
       return;
     }
 
     console.log('💳 Creating Stripe payment intent');
     
-    // Get stake amount from setup state (defaults to 20 if not set)
     const stakeAmount = setupState.temp_stake_amount || 20;
     const penaltyAmount = setupState.temp_penalty_amount || 5;
     
     try {
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: stakeAmount * 100, // Convert to cents
+        amount: stakeAmount * 100,
         currency: 'usd',
         metadata: {
           phone: normalizedPhone,
@@ -246,11 +246,11 @@ async function handleSetupFlow(phone, message) {
       
       await sendSMS(
         normalizedPhone,
-        `You'll stake $${stakeAmount}. Pay here: ${paymentLink}\n\nAfter payment, your judge will be contacted.`
+        `Almost there! Stake your $${stakeAmount} to lock it in:\n\n${paymentLink}\n\nOnce paid, we'll reach out to your judge.`
       );
     } catch (stripeError) {
       console.error('❌ Stripe error:', stripeError);
-      await sendSMS(normalizedPhone, 'Sorry, payment setup failed. Please try again.');
+      await sendSMS(normalizedPhone, 'Sorry, something went wrong setting up payment. Please try again.');
     }
     return;
   }

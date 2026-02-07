@@ -42,7 +42,16 @@ app.get('/pay/:paymentIntentId', (req, res) => {
 app.get('/api/payment-intent/:id', async (req, res) => {
   try {
     const paymentIntent = await stripe.paymentIntents.retrieve(req.params.id);
-    res.json({ clientSecret: paymentIntent.client_secret });
+    const metadata = paymentIntent.metadata || {};
+    
+    res.json({ 
+      clientSecret: paymentIntent.client_secret,
+      amount: paymentIntent.amount,
+      commitmentName: metadata.commitment || null,
+      commitmentType: metadata.commitment_type || 'daily',
+      duration: metadata.deadline_date || '7',
+      penaltyPerFailure: parseInt(metadata.penalty_amount || '5') * 100
+    });
   } catch (error) {
     console.error('Error retrieving payment intent:', error);
     res.status(404).json({ error: 'Payment intent not found' });

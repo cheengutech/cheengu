@@ -5,9 +5,8 @@
 const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { normalizePhone } = require('../utils/phone');
-const { INITIAL_STAKE } = require('../config/stripe');
 
-async function finalizeSetup(phone) {
+async function finalizeSetup(phone, paymentIntent = null) {
   const normalizedPhone = normalizePhone(phone);
   
   const { data: setupState } = await supabase
@@ -18,6 +17,11 @@ async function finalizeSetup(phone) {
 
   if (!setupState) return;
 
+  // Get stake info from payment intent metadata, or fall back to setup state, or defaults
+  const metadata = paymentIntent?.metadata || {};
+  const stakeAmount = parseInt(metadata.stake_amount) || setupState.temp_stake_amount || 20;
+  const penaltyAmount = parseInt(metadata.penalty_amount) || setupState.temp_penalty_amount || 5;
+
   // Calculate dates based on commitment type
   const startDate = new Date();
   let endDate;
@@ -26,7 +30,7 @@ async function finalizeSetup(phone) {
     endDate = new Date(setupState.temp_deadline_date);
   } else {
     // Daily type - use the duration they specified
-    const durationDays = parseInt(setupState.temp_deadline_date) || 7; // Default 7 if parse fails
+    const durationDays = parseInt(setupState.temp_deadline_date) || 7;
     endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + durationDays);
   }
@@ -39,7 +43,10 @@ async function finalizeSetup(phone) {
       commitment_type: setupState.temp_commitment_type || 'daily',
       deadline_date: setupState.temp_commitment_type === 'deadline' ? setupState.temp_deadline_date : null,
       judge_phone: setupState.temp_judge_phone,
-      stake_remaining: INITIAL_STAKE,
+      stake_remaining: stakeAmount,
+      original_stake: stakeAmount,
+      penalty_per_failure: penaltyAmount,
+      payment_intent_id: paymentIntent?.id || null,
       status: 'awaiting_judge',
       commitment_start_date: startDate.toISOString().split('T')[0],
       commitment_end_date: endDate.toISOString().split('T')[0]
