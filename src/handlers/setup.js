@@ -123,8 +123,7 @@ async function handleSetupFlow(phone, message) {
       return;
     }
     
-    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"");
-    return;
+    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"\n\nKeep it simple and specific - your judge needs to be able to verify you did it!");    return;
   }
 
   if (!setupState) {
