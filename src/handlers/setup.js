@@ -38,6 +38,72 @@ async function handleSetupFlow(phone, message) {
 
   console.log('🔍 Setup state check:', setupState, setupError);
 
+  // Handle RESET command - clear any existing setup state and start fresh
+  if (message.toUpperCase() === 'RESET') {
+    console.log('🔄 RESET command received');
+    if (setupState) {
+      await supabase
+        .from('setup_state')
+        .delete()
+        .eq('phone', normalizedPhone);
+      console.log('🗑️ Deleted existing setup state');
+    }
+    
+    await sendSMS(normalizedPhone, "Okay, let's start fresh! Text START when you're ready to set up your commitment.");
+    return;
+  }
+
+  // If user has incomplete setup (stuck in awaiting_payment or other unexpected state)
+  if (setupState && message.toUpperCase() === 'START') {
+    if (setupState.current_step === 'awaiting_payment') {
+      console.log('⚠️ User has incomplete payment setup');
+      await sendSMS(
+        normalizedPhone,
+        `You have an incomplete setup from earlier.\n\nReply RESET to start over, or CONTINUE to get your payment link again.`
+      );
+      return;
+    }
+    // For other incomplete states, allow them to reset
+    if (setupState.current_step !== 'awaiting_commitment') {
+      console.log('⚠️ User has incomplete setup at step:', setupState.current_step);
+      await sendSMS(
+        normalizedPhone,
+        `You have an incomplete setup from earlier.\n\nReply RESET to start over.`
+      );
+      return;
+    }
+  }
+
+  // Handle CONTINUE command - resend payment link if in awaiting_payment state
+  if (message.toUpperCase() === 'CONTINUE' && setupState && setupState.current_step === 'awaiting_payment') {
+    console.log('🔄 CONTINUE command - resending payment link');
+    
+    // Find the most recent payment intent for this phone
+    const paymentIntents = await stripe.paymentIntents.list({
+      limit: 10,
+    });
+    
+    const userPaymentIntent = paymentIntents.data.find(pi => 
+      pi.metadata.phone === normalizedPhone && 
+      pi.status === 'requires_payment_method'
+    );
+    
+    if (userPaymentIntent) {
+      const stakeAmount = setupState.temp_stake_amount || 20;
+      const paymentLink = `${process.env.APP_URL}/pay/${userPaymentIntent.id}`;
+      await sendSMS(
+        normalizedPhone,
+        `Here's your payment link again:\n\n${paymentLink}\n\nStake your $${stakeAmount} to lock in your commitment.`
+      );
+    } else {
+      await sendSMS(
+        normalizedPhone,
+        `Couldn't find your payment link. Reply RESET to start over.`
+      );
+    }
+    return;
+  }
+
   if (!setupState && message.toUpperCase() === 'START') {
     console.log('✨ Creating new setup state');
     const { data: newState, error: insertError } = await supabase
