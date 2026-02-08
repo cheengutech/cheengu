@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+html<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -166,16 +166,18 @@
       <h1>Stake Your Commitment</h1>
       <p class="subtitle">Accountability starts with skin in the game</p>
       
-      <div class="amount">$20</div>
+      <div class="amount" id="stake-amount">Loading...</div>
+
       
       <div class="info">
         <div class="info-row">
           <span class="label">Duration</span>
-          <span class="value">7 days</span>
+          <span class="value" id="duration">...</span>
         </div>
         <div class="info-row">
           <span class="label">Penalty per failure</span>
-          <span class="value">$5</span>
+   <!-- ADD id="penalty" -->
+   <span class="value" id="penalty">...</span>
         </div>
         <div class="info-row">
           <span class="label">Refund if successful</span>
@@ -190,8 +192,7 @@
       
       <div id="card-element"></div>
       <div id="card-errors"></div>
-      
-      <button id="submit-button">Pay $20</button>
+      <button id="submit-button">Loading...</button>
     </div>
     
     <div id="success-message" style="display: none;">
@@ -202,7 +203,6 @@
       </div>
     </div>
   </div>
-
   <script>
     // Get payment intent ID from URL
     const urlPath = window.location.pathname;
@@ -242,6 +242,44 @@
     const errorDisplay = document.getElementById('error-display');
     const errorText = document.getElementById('error-text');
     
+    // NEW: Load payment details and update UI
+    let clientSecret;
+    let totalAmount;
+    
+    async function loadPaymentDetails() {
+      try {
+        const response = await fetch(`/api/payment-intent/${paymentIntentId}`);
+        
+        if (!response.ok) {
+          throw new Error('Failed to retrieve payment information');
+        }
+
+        const data = await response.json();
+        clientSecret = data.clientSecret;
+        
+        // Extract amounts (Stripe uses cents, so divide by 100)
+        totalAmount = data.amount / 100;
+        const duration = data.metadata?.duration || 7;
+        const stakePerFailure = data.metadata?.stake_per_failure || 5;
+        
+        // Update UI
+        document.getElementById('stake-amount').textContent = `$${totalAmount}`;
+        document.getElementById('duration').textContent = `${duration} days`;
+        document.getElementById('penalty').textContent = `$${stakePerFailure}`;
+        document.getElementById('submit-button').textContent = `Pay $${totalAmount}`;
+        
+        console.log('✅ Payment details loaded:', { totalAmount, duration, stakePerFailure });
+      } catch (err) {
+        console.error('Error loading payment details:', err);
+        errorDisplay.style.display = 'block';
+        errorText.textContent = 'Failed to load payment details. Please try again.';
+        submitButton.disabled = true;
+      }
+    }
+    
+    // Load payment details on page load
+    loadPaymentDetails();
+    
     cardElement.on('change', (event) => {
       cardErrors.textContent = event.error ? event.error.message : '';
     });
@@ -253,14 +291,9 @@
       errorDisplay.style.display = 'none';
       
       try {
-        // First, retrieve the payment intent to get the client secret
-        const response = await fetch(`/api/payment-intent/${paymentIntentId}`);
-        
-        if (!response.ok) {
-          throw new Error('Failed to retrieve payment information');
+        if (!clientSecret) {
+          throw new Error('Payment not ready. Please refresh the page.');
         }
-
-        const { clientSecret } = await response.json();
 
         const { error, paymentIntent } = await stripe.confirmCardPayment(
           clientSecret,
@@ -276,7 +309,7 @@
           errorText.textContent = error.message;
           cardErrors.textContent = error.message;
           submitButton.disabled = false;
-          submitButton.textContent = 'Pay $20';
+          submitButton.textContent = `Pay $${totalAmount}`;
         } else if (paymentIntent.status === 'succeeded') {
           document.getElementById('payment-form').style.display = 'none';
           document.getElementById('success-message').style.display = 'block';
@@ -287,7 +320,7 @@
         errorText.textContent = err.message || 'Payment failed. Please try again.';
         cardErrors.textContent = 'Payment failed. Please try again.';
         submitButton.disabled = false;
-        submitButton.textContent = 'Pay $20';
+        submitButton.textContent = `Pay $${totalAmount}`;
       }
     });
   </script>
