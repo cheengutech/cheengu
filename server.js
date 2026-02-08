@@ -42,17 +42,10 @@ app.post('/api/signup', verifyApiKey, triggerStart);
 app.get('/pay/:paymentIntentId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'pay.html'));
 });
-
 // API endpoint to get payment intent client secret
 app.get('/api/payment-intent/:id', async (req, res) => {
   try {
     const paymentIntent = await stripe.paymentIntents.retrieve(req.params.id);
-<<<<<<< HEAD
-    res.json({ 
-      clientSecret: paymentIntent.client_secret,
-      amount: paymentIntent.amount,
-      metadata: paymentIntent.metadata
-=======
     const metadata = paymentIntent.metadata || {};
     
     res.json({ 
@@ -62,7 +55,6 @@ app.get('/api/payment-intent/:id', async (req, res) => {
       commitmentType: metadata.commitment_type || 'daily',
       duration: metadata.deadline_date || '7',
       penaltyPerFailure: parseInt(metadata.penalty_amount || '5') * 100
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
     });
   } catch (error) {
     console.error('Error retrieving payment intent:', error);
