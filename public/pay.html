@@ -1,4 +1,4 @@
-html<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -201,17 +201,7 @@ html<!DOCTYPE html>
     <!-- Payment form (hidden until loaded) -->
     <div id="payment-form" style="display: none;">
       <h1>Stake Your Commitment</h1>
-      <p class="subtitle">Accountability starts with skin in the game</p>
-      
-<<<<<<< HEAD
-      <div class="amount" id="stake-amount">Loading...</div>
-
-      
-      <div class="info">
-        <div class="info-row">
-          <span class="label">Duration</span>
-          <span class="value" id="duration">...</span>
-=======
+      <p class="subtitle">Confirm your stake to get started</p>      
       <div id="commitment-name" class="commitment-name" style="display: none;"></div>
       
       <div class="amount" id="stake-amount">$--</div>
@@ -220,16 +210,10 @@ html<!DOCTYPE html>
         <div class="info-row">
           <span class="label" id="duration-label">Duration</span>
           <span class="value" id="duration-value">--</span>
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         </div>
         <div class="info-row" id="penalty-row">
           <span class="label">Penalty per failure</span>
-<<<<<<< HEAD
-   <!-- ADD id="penalty" -->
-   <span class="value" id="penalty">...</span>
-=======
           <span class="value" id="penalty-value">--</span>
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         </div>
         <div class="info-row">
           <span class="label">Refund if successful</span>
@@ -244,12 +228,8 @@ html<!DOCTYPE html>
       
       <div id="card-element"></div>
       <div id="card-errors"></div>
-<<<<<<< HEAD
-      <button id="submit-button">Loading...</button>
-=======
       
       <button id="submit-button" disabled>Pay $--</button>
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
     </div>
     
     <!-- Success message -->
@@ -401,6 +381,8 @@ html<!DOCTYPE html>
         cardElement.mount('#card-element');
         submitButton.disabled = false;
 
+        console.log('✅ Payment details loaded:', data);
+
       } catch (err) {
         console.error('Error loading payment details:', err);
         showError(err.message || 'Failed to load payment details. Please try again.');
@@ -413,44 +395,6 @@ html<!DOCTYPE html>
       errorState.style.display = 'block';
       document.getElementById('page-error-text').textContent = message;
     }
-    
-    // NEW: Load payment details and update UI
-    let clientSecret;
-    let totalAmount;
-    
-    async function loadPaymentDetails() {
-      try {
-        const response = await fetch(`/api/payment-intent/${paymentIntentId}`);
-        
-        if (!response.ok) {
-          throw new Error('Failed to retrieve payment information');
-        }
-
-        const data = await response.json();
-        clientSecret = data.clientSecret;
-        
-        // Extract amounts (Stripe uses cents, so divide by 100)
-        totalAmount = data.amount / 100;
-        const duration = data.metadata?.duration || 7;
-        const stakePerFailure = data.metadata?.stake_per_failure || 5;
-        
-        // Update UI
-        document.getElementById('stake-amount').textContent = `$${totalAmount}`;
-        document.getElementById('duration').textContent = `${duration} days`;
-        document.getElementById('penalty').textContent = `$${stakePerFailure}`;
-        document.getElementById('submit-button').textContent = `Pay $${totalAmount}`;
-        
-        console.log('✅ Payment details loaded:', { totalAmount, duration, stakePerFailure });
-      } catch (err) {
-        console.error('Error loading payment details:', err);
-        errorDisplay.style.display = 'block';
-        errorText.textContent = 'Failed to load payment details. Please try again.';
-        submitButton.disabled = true;
-      }
-    }
-    
-    // Load payment details on page load
-    loadPaymentDetails();
     
     cardElement.on('change', (event) => {
       cardErrors.textContent = event.error ? event.error.message : '';
@@ -472,13 +416,6 @@ html<!DOCTYPE html>
       errorDisplay.style.display = 'none';
       
       try {
-<<<<<<< HEAD
-        if (!clientSecret) {
-          throw new Error('Payment not ready. Please refresh the page.');
-        }
-
-=======
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         const { error, paymentIntent } = await stripe.confirmCardPayment(
           clientSecret,
           {
@@ -493,11 +430,7 @@ html<!DOCTYPE html>
           errorText.textContent = error.message;
           cardErrors.textContent = error.message;
           submitButton.disabled = false;
-<<<<<<< HEAD
-          submitButton.textContent = `Pay $${totalAmount}`;
-=======
           submitButton.textContent = 'Pay ' + formatCurrency(amount);
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         } else if (paymentIntent.status === 'succeeded') {
           paymentForm.style.display = 'none';
           document.getElementById('success-message').style.display = 'block';
@@ -508,11 +441,7 @@ html<!DOCTYPE html>
         errorText.textContent = err.message || 'Payment failed. Please try again.';
         cardErrors.textContent = 'Payment failed. Please try again.';
         submitButton.disabled = false;
-<<<<<<< HEAD
-        submitButton.textContent = `Pay $${totalAmount}`;
-=======
         submitButton.textContent = 'Pay ' + formatCurrency(amount);
->>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
       }
     });
 
