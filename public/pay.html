@@ -127,6 +127,24 @@ html<!DOCTYPE html>
       animation: spin 0.6s linear infinite;
     }
     
+    .loading-page {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      padding: 48px;
+    }
+    
+    .loading-spinner {
+      width: 32px;
+      height: 32px;
+      border: 3px solid #333;
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -158,14 +176,34 @@ html<!DOCTYPE html>
       color: #ffaaaa;
       font-size: 14px;
     }
+
+    .commitment-name {
+      color: #10b981;
+      font-size: 14px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      padding: 10px 14px;
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+      border-radius: 8px;
+      line-height: 1.4;
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <div id="payment-form">
+    <!-- Loading state -->
+    <div id="loading-state" class="loading-page">
+      <div class="loading-spinner"></div>
+      <p style="color: #888;">Loading payment details...</p>
+    </div>
+
+    <!-- Payment form (hidden until loaded) -->
+    <div id="payment-form" style="display: none;">
       <h1>Stake Your Commitment</h1>
       <p class="subtitle">Accountability starts with skin in the game</p>
       
+<<<<<<< HEAD
       <div class="amount" id="stake-amount">Loading...</div>
 
       
@@ -173,11 +211,25 @@ html<!DOCTYPE html>
         <div class="info-row">
           <span class="label">Duration</span>
           <span class="value" id="duration">...</span>
-        </div>
+=======
+      <div id="commitment-name" class="commitment-name" style="display: none;"></div>
+      
+      <div class="amount" id="stake-amount">$--</div>
+      
+      <div class="info">
         <div class="info-row">
+          <span class="label" id="duration-label">Duration</span>
+          <span class="value" id="duration-value">--</span>
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
+        </div>
+        <div class="info-row" id="penalty-row">
           <span class="label">Penalty per failure</span>
+<<<<<<< HEAD
    <!-- ADD id="penalty" -->
    <span class="value" id="penalty">...</span>
+=======
+          <span class="value" id="penalty-value">--</span>
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         </div>
         <div class="info-row">
           <span class="label">Refund if successful</span>
@@ -192,14 +244,28 @@ html<!DOCTYPE html>
       
       <div id="card-element"></div>
       <div id="card-errors"></div>
+<<<<<<< HEAD
       <button id="submit-button">Loading...</button>
+=======
+      
+      <button id="submit-button" disabled>Pay $--</button>
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
     </div>
     
+    <!-- Success message -->
     <div id="success-message" style="display: none;">
       <div class="success">
         <div class="success-icon">✓</div>
         <h1>Payment Complete</h1>
         <p class="subtitle">Your judge will be contacted shortly. Check your phone for confirmation.</p>
+      </div>
+    </div>
+
+    <!-- Error state (for invalid links) -->
+    <div id="error-state" style="display: none;">
+      <div class="error">
+        <div class="error-title">Invalid Payment Link</div>
+        <div class="error-text" id="page-error-text">This payment link is invalid or has expired. Please request a new link from Cheengu.</div>
       </div>
     </div>
   </div>
@@ -210,13 +276,11 @@ html<!DOCTYPE html>
     
     console.log('Payment Intent ID:', paymentIntentId);
 
-    if (!paymentIntentId || paymentIntentId === 'pay') {
-      document.getElementById('error-display').style.display = 'block';
-      document.getElementById('error-text').textContent = 'Invalid payment link. Please request a new link from Cheengu.';
-      document.getElementById('submit-button').disabled = true;
-    }
-    
-    // Initialize Stripe - REPLACE WITH YOUR PUBLISHABLE KEY
+    // Store commitment data globally
+    let commitmentData = null;
+    let clientSecret = null;
+
+    // Initialize Stripe
     const stripe = Stripe('pk_live_51RyPAIR9AH5bIr2HV11IB5iZBSwWt0LTvL0aDyLyiCXtQgDI6LgOSYdNjBnYJ4Z5EJI7sXnJgDZwzOmHNxf22cF500mqHCBIuC');
     const elements = stripe.elements();
     const cardElement = elements.create('card', {
@@ -233,14 +297,122 @@ html<!DOCTYPE html>
         },
       },
     });
-    
-    cardElement.mount('#card-element');
-    
-    const form = document.getElementById('payment-form');
+
+    // DOM elements
+    const loadingState = document.getElementById('loading-state');
+    const paymentForm = document.getElementById('payment-form');
+    const errorState = document.getElementById('error-state');
     const submitButton = document.getElementById('submit-button');
     const cardErrors = document.getElementById('card-errors');
     const errorDisplay = document.getElementById('error-display');
     const errorText = document.getElementById('error-text');
+
+    // Format currency (expects cents)
+    function formatCurrency(cents) {
+      const dollars = cents / 100;
+      return '$' + (dollars % 1 === 0 ? dollars.toFixed(0) : dollars.toFixed(2));
+    }
+
+    // Format duration for daily commitments
+    function formatDuration(days) {
+      const d = parseInt(days);
+      if (isNaN(d)) return days; // It's a date string for deadline type
+      if (d === 1) return '1 day';
+      if (d === 7) return '1 week';
+      if (d === 14) return '2 weeks';
+      if (d === 30) return '1 month';
+      return d + ' days';
+    }
+
+    // Format deadline date
+    function formatDeadlineDate(dateStr) {
+      try {
+        const date = new Date(dateStr);
+        if (isNaN(date.getTime())) return dateStr;
+        return date.toLocaleDateString('en-US', { 
+          weekday: 'short', 
+          month: 'short', 
+          day: 'numeric' 
+        });
+      } catch {
+        return dateStr;
+      }
+    }
+
+    // Load payment details from backend
+    async function loadPaymentDetails() {
+      if (!paymentIntentId || paymentIntentId === 'pay') {
+        showError('Invalid payment link. Please request a new link from Cheengu.');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/payment-intent/${paymentIntentId}`);
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to load payment details');
+        }
+
+        const data = await response.json();
+        
+        // Store for later use
+        clientSecret = data.clientSecret;
+        commitmentData = data;
+
+        // Get values from response
+        const amount = data.amount || 2000; // In cents
+        const commitmentType = data.commitmentType || 'daily';
+        const duration = data.duration || '7';
+        const penalty = data.penaltyPerFailure || 500; // In cents
+        const commitmentName = data.commitmentName || null;
+
+        // Update UI
+        document.getElementById('stake-amount').textContent = formatCurrency(amount);
+        submitButton.textContent = 'Pay ' + formatCurrency(amount);
+
+        // Handle duration/deadline display based on commitment type
+        if (commitmentType === 'deadline') {
+          document.getElementById('duration-label').textContent = 'Deadline';
+          document.getElementById('duration-value').textContent = formatDeadlineDate(duration);
+          // For deadline commitments, penalty is full stake (hide the per-failure row)
+          document.getElementById('penalty-row').innerHTML = `
+            <span class="label">If incomplete</span>
+            <span class="value">Lose full stake</span>
+          `;
+        } else {
+          document.getElementById('duration-label').textContent = 'Duration';
+          document.getElementById('duration-value').textContent = formatDuration(duration);
+          document.getElementById('penalty-value').textContent = formatCurrency(penalty);
+        }
+
+        // Show commitment name if provided
+        if (commitmentName) {
+          const nameEl = document.getElementById('commitment-name');
+          nameEl.textContent = '"' + commitmentName + '"';
+          nameEl.style.display = 'block';
+        }
+
+        // Show payment form
+        loadingState.style.display = 'none';
+        paymentForm.style.display = 'block';
+        
+        // Mount card element and enable button
+        cardElement.mount('#card-element');
+        submitButton.disabled = false;
+
+      } catch (err) {
+        console.error('Error loading payment details:', err);
+        showError(err.message || 'Failed to load payment details. Please try again.');
+      }
+    }
+
+    function showError(message) {
+      loadingState.style.display = 'none';
+      paymentForm.style.display = 'none';
+      errorState.style.display = 'block';
+      document.getElementById('page-error-text').textContent = message;
+    }
     
     // NEW: Load payment details and update UI
     let clientSecret;
@@ -286,15 +458,27 @@ html<!DOCTYPE html>
     
     submitButton.addEventListener('click', async (e) => {
       e.preventDefault();
+      
+      if (!clientSecret) {
+        errorDisplay.style.display = 'block';
+        errorText.textContent = 'Payment not ready. Please refresh the page.';
+        return;
+      }
+
+      const amount = commitmentData?.amount || 2000;
+      
       submitButton.disabled = true;
       submitButton.innerHTML = '<span class="loading"></span>';
       errorDisplay.style.display = 'none';
       
       try {
+<<<<<<< HEAD
         if (!clientSecret) {
           throw new Error('Payment not ready. Please refresh the page.');
         }
 
+=======
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         const { error, paymentIntent } = await stripe.confirmCardPayment(
           clientSecret,
           {
@@ -309,9 +493,13 @@ html<!DOCTYPE html>
           errorText.textContent = error.message;
           cardErrors.textContent = error.message;
           submitButton.disabled = false;
+<<<<<<< HEAD
           submitButton.textContent = `Pay $${totalAmount}`;
+=======
+          submitButton.textContent = 'Pay ' + formatCurrency(amount);
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
         } else if (paymentIntent.status === 'succeeded') {
-          document.getElementById('payment-form').style.display = 'none';
+          paymentForm.style.display = 'none';
           document.getElementById('success-message').style.display = 'block';
         }
       } catch (err) {
@@ -320,9 +508,16 @@ html<!DOCTYPE html>
         errorText.textContent = err.message || 'Payment failed. Please try again.';
         cardErrors.textContent = 'Payment failed. Please try again.';
         submitButton.disabled = false;
+<<<<<<< HEAD
         submitButton.textContent = `Pay $${totalAmount}`;
+=======
+        submitButton.textContent = 'Pay ' + formatCurrency(amount);
+>>>>>>> 43cd2013ed48d81097219e9dc1caac599e87cf7c
       }
     });
+
+    // Load payment details on page load
+    loadPaymentDetails();
   </script>
 </body>
 </html>
