@@ -22,6 +22,17 @@ async function finalizeSetup(phone, paymentIntent = null) {
   const stakeAmount = parseInt(metadata.stake_amount) || setupState.temp_stake_amount || 20;
   const penaltyAmount = parseInt(metadata.penalty_amount) || setupState.temp_penalty_amount || 5;
 
+  // Delete any old completed user records for this phone (to allow new commitments)
+  const { error: deleteError } = await supabase
+    .from('users')
+    .delete()
+    .eq('phone', normalizedPhone)
+    .eq('status', 'completed');
+  
+  if (deleteError) {
+    console.error('Error deleting old user record:', deleteError);
+  }
+
   // Calculate dates based on commitment type
   const startDate = new Date();
   let endDate;
@@ -35,7 +46,7 @@ async function finalizeSetup(phone, paymentIntent = null) {
     endDate.setDate(endDate.getDate() + durationDays);
   }
 
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from('users')
     .insert({
       phone: normalizedPhone,
@@ -53,6 +64,18 @@ async function finalizeSetup(phone, paymentIntent = null) {
     })
     .select()
     .single();
+
+  if (userError) {
+    console.error('❌ Error creating user:', userError);
+    return;
+  }
+
+  if (!user) {
+    console.error('❌ User insert returned null');
+    return;
+  }
+
+  console.log('✅ User created:', user.id);
 
   // Create judge entry
   await supabase.from('judges').insert({
