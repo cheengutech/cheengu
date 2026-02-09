@@ -57,7 +57,7 @@ async function handleSetupFlow(phone, message) {
       .from('setup_state')
       .insert({
         phone: normalizedPhone,
-        current_step: 'awaiting_commitment'
+        current_step: 'awaiting_name'
       })
       .select()
       .single();
@@ -70,7 +70,7 @@ async function handleSetupFlow(phone, message) {
       return;
     }
     
-    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"");
+    await sendSMS(normalizedPhone, "Let's set up your commitment! First, what's your name?\n\n(e.g., Brian)");
     return;
   }
 
@@ -88,6 +88,29 @@ async function handleSetupFlow(phone, message) {
     } else {
       await sendSMS(normalizedPhone, 'Nothing to reset. Text START to begin a new commitment.');
     }
+    return;
+  }
+
+  // Handle name collection
+  if (setupState.current_step === 'awaiting_name') {
+    const userName = message.trim();
+    
+    if (userName.length < 1 || userName.length > 50) {
+      await sendSMS(normalizedPhone, 'Please enter a valid name (1-50 characters).');
+      return;
+    }
+
+    console.log('👤 Name collected:', userName);
+    
+    await supabase
+      .from('setup_state')
+      .update({
+        temp_user_name: userName,
+        current_step: 'awaiting_commitment'
+      })
+      .eq('phone', normalizedPhone);
+    
+    await sendSMS(normalizedPhone, `Hey ${userName}! What's your commitment?\n\nExamples:\n• "Do 50 pushups daily"\n• "Launch my landing page by Feb 1"\n• "No alcohol for 30 days"`);
     return;
   }
 
@@ -208,7 +231,7 @@ async function handleSetupFlow(phone, message) {
     
     await sendSMS(
       normalizedPhone, 
-      `${days} days - locked in! Each missed day = -$${penalty}.\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`
+      `${days} days - locked in! Each missed day = -$${penalty}.\n\nWho's going to keep you honest? Send their name and number:\n\n(e.g., Brian 562-XXX-XXXX)`
     );
     return;
   }
@@ -231,24 +254,43 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
     
-    await sendSMS(normalizedPhone, `Deadline set! 📅\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`);
+    await sendSMS(normalizedPhone, `Deadline set! 📅\n\nWho's going to keep you honest? Send their name and number:\n\n(e.g., Brian 562-XXX-XXXX)`);
     return;
   }
 
   if (setupState.current_step === 'awaiting_judge_phone') {
-    console.log('👨‍⚖️ Processing judge phone:', message);
-    const judgePhone = normalizePhone(message);
+    console.log('👨‍⚖️ Processing judge info:', message);
+    
+    // Parse name and phone from input like "Justin 818-480-8293" or "Justin 8184808293"
+    const parts = message.trim().split(/\s+/);
+    
+    if (parts.length < 2) {
+      await sendSMS(normalizedPhone, "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
+      return;
+    }
+    
+    // Last part is the phone number, everything before is the name
+    const phonepart = parts[parts.length - 1];
+    const judgeName = parts.slice(0, -1).join(' ');
+    const judgePhone = normalizePhone(phonepart);
     
     if (judgePhone === normalizedPhone) {
       console.log('⚠️ User tried to be their own judge');
       await sendSMS(normalizedPhone, "Nice try 😄 You can't be your own judge. Who else can hold you accountable?");
       return;
     }
+    
+    if (!judgePhone || judgePhone.length < 10) {
+      await sendSMS(normalizedPhone, "Couldn't read that number. Try again:\n\n(e.g., Brian 562-XXX-XXXX)");
+      return;
+    }
 
+    console.log('👨‍⚖️ Judge name:', judgeName, 'Phone:', judgePhone);
     console.log('💳 Creating Stripe payment intent');
     
     const stakeAmount = setupState.temp_stake_amount || 20;
     const penaltyAmount = setupState.temp_penalty_amount || 5;
+    const userName = setupState.temp_user_name || 'Someone';
     
     try {
       const paymentIntent = await stripe.paymentIntents.create({
@@ -256,10 +298,12 @@ async function handleSetupFlow(phone, message) {
         currency: 'usd',
         metadata: {
           phone: normalizedPhone,
+          user_name: userName,
           commitment: setupState.temp_commitment,
           commitment_type: setupState.temp_commitment_type,
           deadline_date: setupState.temp_deadline_date || '',
           judge_phone: judgePhone,
+          judge_name: judgeName,
           stake_amount: stakeAmount.toString(),
           penalty_amount: penaltyAmount.toString()
         }
@@ -271,6 +315,7 @@ async function handleSetupFlow(phone, message) {
         .from('setup_state')
         .update({
           temp_judge_phone: judgePhone,
+          temp_judge_name: judgeName,
           current_step: 'awaiting_payment'
         })
         .eq('phone', normalizedPhone);
@@ -282,7 +327,7 @@ async function handleSetupFlow(phone, message) {
       
       await sendSMS(
         normalizedPhone,
-        `Almost there! Stake your $${stakeAmount} to lock it in:\n\n${paymentLink}\n\nOnce paid, we'll reach out to your judge.`
+        `Almost there! Stake your $${stakeAmount} to lock it in:\n\n${paymentLink}\n\nOnce paid, we'll reach out to ${judgeName}.`
       );
     } catch (stripeError) {
       console.error('❌ Stripe error:', stripeError);
