@@ -44,15 +44,73 @@ async function handleSetupFlow(phone, message) {
       await sendSMS(normalizedPhone, 
         `Cheengu Commands:\n\n` +
         `START - Begin a new commitment\n` +
+        `STATUS - Check your current commitment\n` +
+        `HISTORY - See past commitments\n` +
         `RESET - Cancel setup and start over\n` +
         `HELP - Show this menu\n\n` +
-        `Once in a commitment, your judge will verify daily at 8pm. That's it!\n\n` +
         `Questions? Just reply here.`
       );
       return;
     }
     
     console.log('✨ Creating new setup state');
+
+  // Handle STATUS command - check current commitment
+  if (message.toUpperCase() === 'STATUS') {
+    const { data: activeUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .eq('status', 'active')
+      .single();
+    
+    if (!activeUser) {
+      await sendSMS(normalizedPhone, "You don't have an active commitment right now.\n\nText START to begin one!");
+      return;
+    }
+    
+    const daysLeft = Math.ceil((new Date(activeUser.commitment_end_date) - new Date()) / (1000 * 60 * 60 * 24));
+    const judgeName = activeUser.judge_name || 'your judge';
+    
+    await sendSMS(normalizedPhone,
+      `📊 Your Current Commitment:\n\n` +
+      `"${activeUser.commitment_text}"\n\n` +
+      `💰 Stake remaining: $${activeUser.stake_remaining} of $${activeUser.original_stake}\n` +
+      `📅 ${daysLeft} days left\n` +
+      `👤 Judge: ${judgeName}\n\n` +
+      `Keep going! 💪`
+    );
+    return;
+  }
+
+  // Handle HISTORY command - see past commitments
+  if (message.toUpperCase() === 'HISTORY') {
+    const { data: pastCommitments } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .eq('status', 'completed')
+      .order('commitment_end_date', { ascending: false })
+      .limit(5);
+    
+    if (!pastCommitments || pastCommitments.length === 0) {
+      await sendSMS(normalizedPhone, "No completed commitments yet.\n\nText START to begin your first one!");
+      return;
+    }
+    
+    let historyMsg = `📜 Your Past Commitments:\n\n`;
+    
+    for (const c of pastCommitments) {
+      const refunded = c.refund_amount || c.stake_remaining || 0;
+      const lost = c.original_stake - refunded;
+      const emoji = lost === 0 ? '✅' : (refunded > 0 ? '⚠️' : '❌');
+      historyMsg += `${emoji} "${c.commitment_text}"\n`;
+      historyMsg += `   $${refunded}/$${c.original_stake} returned\n\n`;
+    }
+    
+    await sendSMS(normalizedPhone, historyMsg);
+    return;
+  }
     const { data: newState, error: insertError } = await supabase
       .from('setup_state')
       .insert({
