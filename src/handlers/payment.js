@@ -22,17 +22,6 @@ async function finalizeSetup(phone, paymentIntent = null) {
   const stakeAmount = parseInt(metadata.stake_amount) || setupState.temp_stake_amount || 20;
   const penaltyAmount = parseInt(metadata.penalty_amount) || setupState.temp_penalty_amount || 5;
 
-  // Delete any old completed user records for this phone (to allow new commitments)
-  const { error: deleteError } = await supabase
-    .from('users')
-    .delete()
-    .eq('phone', normalizedPhone)
-    .eq('status', 'completed');
-  
-  if (deleteError) {
-    console.error('Error deleting old user record:', deleteError);
-  }
-
   // Calculate dates based on commitment type
   const startDate = new Date();
   let endDate;
