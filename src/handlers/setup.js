@@ -38,15 +38,15 @@ async function handleSetupFlow(phone, message) {
 
   console.log('🔍 Setup state check:', setupState, setupError);
 
-  if (!setupState && (message.toUpperCase() === 'START' || message.toUpperCase() === 'HELP' || message.toUpperCase() === 'MENU')) {
-    // Handle HELP/MENU commands
-    if (message.toUpperCase() === 'HELP' || message.toUpperCase() === 'MENU') {
+  if (!setupState && (message.toUpperCase() === 'START' || message.toUpperCase() === 'HELP')) {
+    // Handle HELP command
+    if (message.toUpperCase() === 'HELP') {
       await sendSMS(normalizedPhone, 
         `Cheengu Commands:\n\n` +
         `START - Begin a new commitment\n` +
         `HELP - Show this menu\n\n` +
-        `Once in a commitment, your judge will verify daily. That's it!\n\n` +
-        `Questions? Reply to this number anytime.`
+        `Once in a commitment, your judge will verify daily at 8pm. That's it!\n\n` +
+        `Questions? Just reply here.`
       );
       return;
     }
