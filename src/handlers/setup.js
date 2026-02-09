@@ -38,7 +38,19 @@ async function handleSetupFlow(phone, message) {
 
   console.log('🔍 Setup state check:', setupState, setupError);
 
-  if (!setupState && message.toUpperCase() === 'START') {
+  if (!setupState && (message.toUpperCase() === 'START' || message.toUpperCase() === 'HELP' || message.toUpperCase() === 'MENU')) {
+    // Handle HELP/MENU commands
+    if (message.toUpperCase() === 'HELP' || message.toUpperCase() === 'MENU') {
+      await sendSMS(normalizedPhone, 
+        `Cheengu Commands:\n\n` +
+        `START - Begin a new commitment\n` +
+        `HELP - Show this menu\n\n` +
+        `Once in a commitment, your judge will verify daily. That's it!\n\n` +
+        `Questions? Reply to this number anytime.`
+      );
+      return;
+    }
+    
     console.log('✨ Creating new setup state');
     const { data: newState, error: insertError } = await supabase
       .from('setup_state')
@@ -63,7 +75,7 @@ async function handleSetupFlow(phone, message) {
 
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
-    await sendSMS(normalizedPhone, 'Text START to begin setting up your accountability commitment.');
+    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HELP for available commands.');
     return;
   }
 
