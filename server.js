@@ -13,17 +13,17 @@ const app = express();
 const cors = require('cors');
 
 app.use(cors({
-  origin: [
-    'https://www.cheengu.com', 
-    'https://cheengu.com',
-    'https://cheengu-v1.onrender.com'  // ← ADD THIS
-  ],
+  origin: ['https://www.cheengu.com', 'https://cheengu.com'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Middleware
+// IMPORTANT: Stripe webhook must come BEFORE other body parsers
+app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
+// Other middleware (AFTER stripe webhook)
 app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 app.use(express.static('public'));
 
 app.use((req, res, next) => {
@@ -31,17 +31,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
 
 // Routes
 app.post('/sms', twilioWebhook);
-app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.post('/api/signup', verifyApiKey, triggerStart);
 
 // Serve payment page for any /pay/* route
 app.get('/pay/:paymentIntentId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'pay.html'));
 });
+
 // API endpoint to get payment intent client secret
 app.get('/api/payment-intent/:id', async (req, res) => {
   try {
