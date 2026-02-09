@@ -138,6 +138,43 @@ app.get('/manual-finalize/:phone', async (req, res) => {
   }
 });
 
+// Test refund endpoint (for testing only - remove in production)
+app.get('/test-end-commitment/:phone', async (req, res) => {
+  const { endCommitment } = require('./src/services/commitment');
+  const { supabase } = require('./src/config/database');
+  const { normalizePhone } = require('./src/utils/phone');
+  
+  try {
+    const phone = normalizePhone(req.params.phone);
+    console.log('🧪 Test end commitment for:', phone);
+    
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', phone)
+      .eq('status', 'active')
+      .single();
+    
+    if (!user) {
+      return res.status(404).json({ error: 'No active commitment found for this phone' });
+    }
+    
+    console.log('📋 User found:', user.id, 'Stake remaining:', user.stake_remaining, 'Payment Intent:', user.payment_intent_id);
+    
+    await endCommitment(user.id, 'manual_test');
+    
+    res.json({ 
+      status: 'ok', 
+      message: 'Commitment ended!',
+      refund_amount: user.stake_remaining,
+      payment_intent_id: user.payment_intent_id
+    });
+  } catch (error) {
+    console.error('❌ Test end commitment error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
 // Start cron jobs
 startDailyCronJobs();
 
