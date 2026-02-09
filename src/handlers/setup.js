@@ -38,72 +38,6 @@ async function handleSetupFlow(phone, message) {
 
   console.log('🔍 Setup state check:', setupState, setupError);
 
-  // Handle RESET command - clear any existing setup state and start fresh
-  if (message.toUpperCase() === 'RESET') {
-    console.log('🔄 RESET command received');
-    if (setupState) {
-      await supabase
-        .from('setup_state')
-        .delete()
-        .eq('phone', normalizedPhone);
-      console.log('🗑️ Deleted existing setup state');
-    }
-    
-    await sendSMS(normalizedPhone, "Okay, let's start fresh! Text START when you're ready to set up your commitment.");
-    return;
-  }
-
-  // If user has incomplete setup (stuck in awaiting_payment or other unexpected state)
-  if (setupState && message.toUpperCase() === 'START') {
-    if (setupState.current_step === 'awaiting_payment') {
-      console.log('⚠️ User has incomplete payment setup');
-      await sendSMS(
-        normalizedPhone,
-        `You have an incomplete setup from earlier.\n\nReply RESET to start over, or CONTINUE to get your payment link again.`
-      );
-      return;
-    }
-    // For other incomplete states, allow them to reset
-    if (setupState.current_step !== 'awaiting_commitment') {
-      console.log('⚠️ User has incomplete setup at step:', setupState.current_step);
-      await sendSMS(
-        normalizedPhone,
-        `You have an incomplete setup from earlier.\n\nReply RESET to start over.`
-      );
-      return;
-    }
-  }
-
-  // Handle CONTINUE command - resend payment link if in awaiting_payment state
-  if (message.toUpperCase() === 'CONTINUE' && setupState && setupState.current_step === 'awaiting_payment') {
-    console.log('🔄 CONTINUE command - resending payment link');
-    
-    // Find the most recent payment intent for this phone
-    const paymentIntents = await stripe.paymentIntents.list({
-      limit: 10,
-    });
-    
-    const userPaymentIntent = paymentIntents.data.find(pi => 
-      pi.metadata.phone === normalizedPhone && 
-      pi.status === 'requires_payment_method'
-    );
-    
-    if (userPaymentIntent) {
-      const stakeAmount = setupState.temp_stake_amount || 20;
-      const paymentLink = `${process.env.APP_URL}/pay/${userPaymentIntent.id}`;
-      await sendSMS(
-        normalizedPhone,
-        `Here's your payment link again:\n\n${paymentLink}\n\nStake your $${stakeAmount} to lock in your commitment.`
-      );
-    } else {
-      await sendSMS(
-        normalizedPhone,
-        `Couldn't find your payment link. Reply RESET to start over.`
-      );
-    }
-    return;
-  }
-
   if (!setupState && message.toUpperCase() === 'START') {
     console.log('✨ Creating new setup state');
     const { data: newState, error: insertError } = await supabase
@@ -123,7 +57,8 @@ async function handleSetupFlow(phone, message) {
       return;
     }
     
-    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"\n\nKeep it simple and specific - your judge needs to be able to verify you did it!");    return;
+    await sendSMS(normalizedPhone, "What's your commitment?\n\nExamples:\n• \"Do 50 pushups daily\"\n• \"Launch my landing page by Feb 1\"\n• \"No alcohol for 30 days\"");
+    return;
   }
 
   if (!setupState) {
@@ -191,14 +126,15 @@ async function handleSetupFlow(phone, message) {
 
     console.log('💰 Stake amount selected:', stakeAmount);
 
-    // Calculate penalty (20% of stake or $5 minimum)
-    const penalty = Math.max(5, Math.round(stakeAmount * 0.2));
+    // Calculate penalty (stake ÷ days, minimum $5)
+    // Note: For daily commitments, we'll recalculate once we know the duration
+    // For now, store null and calculate after we get days
+    const penalty = null; // Will be calculated after duration is set
     
     await supabase
       .from('setup_state')
       .update({
         temp_stake_amount: stakeAmount,
-        temp_penalty_amount: penalty,
         current_step: setupState.temp_commitment_type === 'daily' ? 'awaiting_duration' : 'awaiting_deadline_date'
       })
       .eq('phone', normalizedPhone);
@@ -206,9 +142,15 @@ async function handleSetupFlow(phone, message) {
     if (setupState.temp_commitment_type === 'daily') {
       await sendSMS(
         normalizedPhone, 
-        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
+        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
       );
     } else {
+      // For deadline commitments, penalty is the full stake (all or nothing)
+      await supabase
+        .from('setup_state')
+        .update({ temp_penalty_amount: stakeAmount })
+        .eq('phone', normalizedPhone);
+        
       await sendSMS(
         normalizedPhone, 
         `$${stakeAmount} it is! 💪\n\nYour judge will verify on the deadline. Miss it and you lose the full stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
@@ -227,17 +169,22 @@ async function handleSetupFlow(phone, message) {
 
     console.log('📆 Duration set:', days, 'days');
     
+    // Calculate penalty: stake ÷ days, minimum $1, rounded to nearest dollar
+    const stakeAmount = setupState.temp_stake_amount || 20;
+    const penalty = Math.max(1, Math.round(stakeAmount / days));
+    
     await supabase
       .from('setup_state')
       .update({
         temp_deadline_date: days.toString(),
+        temp_penalty_amount: penalty,
         current_step: 'awaiting_judge_phone'
       })
       .eq('phone', normalizedPhone);
     
     await sendSMS(
       normalizedPhone, 
-      `${days} days - locked in!\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`
+      `${days} days - locked in! Each missed day = -$${penalty}.\n\nNow, who's going to keep you honest? Send your judge's phone number (with area code):`
     );
     return;
   }
