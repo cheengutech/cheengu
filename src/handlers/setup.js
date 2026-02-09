@@ -44,6 +44,7 @@ async function handleSetupFlow(phone, message) {
       await sendSMS(normalizedPhone, 
         `Cheengu Commands:\n\n` +
         `START - Begin a new commitment\n` +
+        `RESET - Cancel setup and start over\n` +
         `HELP - Show this menu\n\n` +
         `Once in a commitment, your judge will verify daily at 8pm. That's it!\n\n` +
         `Questions? Just reply here.`
@@ -76,6 +77,17 @@ async function handleSetupFlow(phone, message) {
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
     await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HELP for available commands.');
+    return;
+  }
+
+  // Handle RESET command - clear setup state and start fresh
+  if (message.toUpperCase() === 'RESET') {
+    if (setupState) {
+      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+      await sendSMS(normalizedPhone, 'Setup cancelled. Text START to begin a new commitment.');
+    } else {
+      await sendSMS(normalizedPhone, 'Nothing to reset. Text START to begin a new commitment.');
+    }
     return;
   }
 
@@ -276,6 +288,31 @@ async function handleSetupFlow(phone, message) {
       console.error('❌ Stripe error:', stripeError);
       await sendSMS(normalizedPhone, 'Sorry, something went wrong setting up payment. Please try again.');
     }
+    return;
+  }
+  
+  // Handle awaiting_payment state - user hasn't paid yet
+  if (setupState.current_step === 'awaiting_payment') {
+    // Check if they want to restart
+    if (message.toUpperCase() === 'START') {
+      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+      await sendSMS(normalizedPhone, 'Previous setup cleared. Let\'s start fresh!\n\nWhat\'s your commitment?');
+      
+      await supabase
+        .from('setup_state')
+        .insert({
+          phone: normalizedPhone,
+          current_step: 'awaiting_commitment'
+        });
+      return;
+    }
+    
+    // Otherwise, remind them to pay
+    const stakeAmount = setupState.temp_stake_amount || 20;
+    await sendSMS(
+      normalizedPhone,
+      `You have a pending commitment waiting for payment ($${stakeAmount}).\n\nReply START to cancel and begin fresh, or complete your payment to activate.`
+    );
     return;
   }
   
