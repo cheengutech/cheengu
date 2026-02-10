@@ -12,13 +12,15 @@ async function handleSetupFlow(phone, message) {
   console.log('📞 Normalized phone:', normalizedPhone);
   
   // Check if user already exists and is active
-  const { data: existingUser, error: userError } = await supabase
+  const { data: existingUsers, error: userError } = await supabase
     .from('users')
     .select('*')
     .eq('phone', normalizedPhone)
-    .single();
+    .eq('status', 'active');
   
-  console.log('👤 Existing user check:', existingUser, userError);
+  const existingUser = existingUsers && existingUsers.length > 0 ? existingUsers[0] : null;
+  
+  console.log('👤 Existing user check:', existingUser ? existingUser.id : null, userError);
   
   if (existingUser && existingUser.status === 'active') {
     console.log('⚠️ User already has active commitment');
