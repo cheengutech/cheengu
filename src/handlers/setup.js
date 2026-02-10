@@ -115,6 +115,18 @@ async function handleSetupFlow(phone, message) {
 
   // Handle RESET command - clear setup state and start fresh
   if (upperMessage === 'RESET') {
+    // Check if they have an active commitment
+    const { data: activeUsers } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .eq('status', 'active');
+    
+    if (activeUsers && activeUsers.length > 0) {
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress.");
+      return;
+    }
+    
     if (setupState) {
       await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
       await sendSMS(normalizedPhone, 'Setup cancelled. Text START to begin a new commitment.');
