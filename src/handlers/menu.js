@@ -53,7 +53,7 @@ async function handleMenuCommand(judgePhone) {
     // If log exists and already verified, skip
     if (existingLog && existingLog.outcome !== 'pending') continue;
 
-    const userName = user.phone.slice(-4); // Last 4 digits as identifier
+    const userName = user.user_name || user.phone.slice(-4); // Use name if available, else last 4 digits
     
     availableVerifications.push({
       logId: existingLog?.id || null, // May not exist yet
@@ -75,6 +75,12 @@ async function handleMenuCommand(judgePhone) {
   // Create menu session (expires in 1 hour)
   const expiresAt = new Date();
   expiresAt.setHours(expiresAt.getHours() + 1);
+
+  // Deactivate any existing sessions first
+  await supabase
+    .from('judge_menu_sessions')
+    .update({ active: false })
+    .eq('judge_phone', judgePhone);
 
   const { data: session, error: sessionError } = await supabase
     .from('judge_menu_sessions')
@@ -100,8 +106,8 @@ async function handleMenuCommand(judgePhone) {
     const item = availableVerifications[0];
     
     menuMessage = `📋 MENU - ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}\n\n`;
-    menuMessage += `User ${item.userName}\n`;
-    menuMessage += `${item.commitmentText}\n\n`;
+    menuMessage += `${item.userName}\n`;
+    menuMessage += `"${item.commitmentText}"\n\n`;
     menuMessage += `Reply:\n`;
     menuMessage += `1 - Completed ✓\n`;
     menuMessage += `2 - Failed ✗`;
@@ -110,7 +116,7 @@ async function handleMenuCommand(judgePhone) {
     
     availableVerifications.forEach((item, index) => {
       const optionNum = (index * 2) + 1;
-      menuMessage += `User ${item.userName} - ${item.commitmentText}\n`;
+      menuMessage += `${item.userName} - "${item.commitmentText}"\n`;
       menuMessage += `${optionNum} - Completed ✓\n`;
       menuMessage += `${optionNum + 1} - Failed ✗\n\n`;
     });
@@ -126,6 +132,13 @@ async function handleMenuCommand(judgePhone) {
  * Returns true if this was a menu response, false otherwise
  */
 async function handleMenuResponse(judgePhone, message) {
+  // Ignore command keywords - let them pass through to other handlers
+  const upperMessage = message.trim().toUpperCase();
+  const commands = ['START', 'HELP', 'STATUS', 'HISTORY', 'RESET', 'MENU', 'YES', 'NO'];
+  if (commands.includes(upperMessage)) {
+    return false; // Not a menu response, let other handlers deal with it
+  }
+
   // Check if judge has an active menu session
   const { data: session } = await supabase
     .from('judge_menu_sessions')
@@ -146,7 +159,7 @@ async function handleMenuResponse(judgePhone, message) {
   const choice = parseInt(message.trim());
   
   if (isNaN(choice)) {
-    await sendSMS(judgePhone, "Invalid choice. Reply with a number or text MENU again.");
+    await sendSMS(judgePhone, "Invalid choice. Reply with a number (1 or 2) or text MENU again.");
     return true; // Was a menu response, just invalid
   }
 
@@ -163,7 +176,7 @@ async function handleMenuResponse(judgePhone, message) {
     } else if (choice === 2) {
       isSuccess = false;
     } else {
-      await sendSMS(judgePhone, "Invalid choice. Reply 1 or 2.");
+      await sendSMS(judgePhone, "Invalid choice. Reply 1 for completed or 2 for failed.");
       return true;
     }
   } else {
@@ -250,13 +263,14 @@ async function handleMenuResponse(judgePhone, message) {
     }
   } else {
     // Success - just confirm
-    await sendSMS(verification.userPhone, `✓ Day marked as PASS by your judge.\n${verification.commitmentText}\n${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`);
+    const userName = user.user_name || 'Your commitment';
+    await sendSMS(verification.userPhone, `✅ Day verified by your judge!\n\n"${verification.commitmentText}"\n\nKeep it up! 💪`);
   }
 
   // Confirm to judge
   const actionText = isSuccess ? 'completed' : 'failed';
-  const emoji = isSuccess ? '✓' : '✗';
-  const confirmMessage = `${emoji} Marked User ${verification.userName} as ${actionText}\n${verification.commitmentText}\n${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  const emoji = isSuccess ? '✅' : '❌';
+  const confirmMessage = `${emoji} Marked ${verification.userName} as ${actionText}.\n\n"${verification.commitmentText}"`;
   
   await sendSMS(judgePhone, confirmMessage);
 
