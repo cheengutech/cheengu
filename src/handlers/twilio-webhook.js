@@ -27,9 +27,9 @@ async function twilioWebhook(req, res) {
       return res.status(200).send('<Response></Response>');
     }
 
-    // HELP, STATUS, HISTORY commands - route to setup flow
+    // INFO, STATUS, HISTORY, RESET commands - route to setup flow
     const upperMessage = message.trim().toUpperCase();
-    if (upperMessage === 'HELP' || upperMessage === 'STATUS' || upperMessage === 'HISTORY') {
+    if (upperMessage === 'INFO' || upperMessage === 'STATUS' || upperMessage === 'HISTORY' || upperMessage === 'RESET') {
       await handleSetupFlow(phone, message);
       return res.status(200).send('<Response></Response>');
     }

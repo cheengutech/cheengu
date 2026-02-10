@@ -134,7 +134,7 @@ async function handleMenuCommand(judgePhone) {
 async function handleMenuResponse(judgePhone, message) {
   // Ignore command keywords - let them pass through to other handlers
   const upperMessage = message.trim().toUpperCase();
-  const commands = ['START', 'HELP', 'STATUS', 'HISTORY', 'RESET', 'MENU', 'YES', 'NO'];
+  const commands = ['START', 'INFO', 'STATUS', 'HISTORY', 'RESET', 'MENU', 'YES', 'NO'];
   if (commands.includes(upperMessage)) {
     return false; // Not a menu response, let other handlers deal with it
   }
