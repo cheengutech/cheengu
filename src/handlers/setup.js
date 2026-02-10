@@ -70,15 +70,15 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
-  // Handle INFO command (works anytime)
-  if (upperMessage === 'INFO') {
+  // Handle CMDS command (works anytime)
+  if (upperMessage === 'CMDS') {
     await sendSMS(normalizedPhone, 
       `Cheengu Commands:\n\n` +
       `START - Begin a new commitment\n` +
       `STATUS - Check your current commitment\n` +
       `HISTORY - See past commitments\n` +
       `RESET - Cancel setup and start over\n` +
-      `INFO - Show this menu\n\n` +
+      `CMDS - Show this menu\n\n` +
       `Questions? Just reply here.`
     );
     return;
@@ -164,7 +164,7 @@ async function handleSetupFlow(phone, message) {
   // No setup state and not a command - prompt to start
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
-    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or INFO for available commands.');
+    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or CMDS for available commands.');
     return;
   }
 
