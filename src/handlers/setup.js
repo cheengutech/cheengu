@@ -11,54 +11,10 @@ async function handleSetupFlow(phone, message) {
   const normalizedPhone = normalizePhone(phone);
   console.log('📞 Normalized phone:', normalizedPhone);
   
-  // Check if user already exists and is active
-  const { data: existingUsers, error: userError } = await supabase
-    .from('users')
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .eq('status', 'active');
-  
-  const existingUser = existingUsers && existingUsers.length > 0 ? existingUsers[0] : null;
-  
-  console.log('👤 Existing user check:', existingUser ? existingUser.id : null, userError);
-  
-  if (existingUser && existingUser.status === 'active') {
-    console.log('⚠️ User already has active commitment');
-    await sendSMS(
-      normalizedPhone,
-      'You already have an active commitment. Complete it first before starting a new one.'
-    );
-    return;
-  }
+  const upperMessage = message.trim().toUpperCase();
 
-  // Get or create setup state
-  let { data: setupState, error: setupError } = await supabase
-    .from('setup_state')
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .single();
-
-  console.log('🔍 Setup state check:', setupState, setupError);
-
-  if (!setupState && (message.toUpperCase() === 'START' || message.toUpperCase() === 'HELP')) {
-    // Handle HELP command
-    if (message.toUpperCase() === 'HELP') {
-      await sendSMS(normalizedPhone, 
-        `Cheengu Commands:\n\n` +
-        `START - Begin a new commitment\n` +
-        `STATUS - Check your current commitment\n` +
-        `HISTORY - See past commitments\n` +
-        `RESET - Cancel setup and start over\n` +
-        `HELP - Show this menu\n\n` +
-        `Questions? Just reply here.`
-      );
-      return;
-    }
-    
-    console.log('✨ Creating new setup state');
-
-  // Handle STATUS command - check current commitment
-  if (message.toUpperCase() === 'STATUS') {
+  // Handle STATUS command - check current commitment (works anytime)
+  if (upperMessage === 'STATUS') {
     const { data: activeUser } = await supabase
       .from('users')
       .select('*')
@@ -85,8 +41,8 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
-  // Handle HISTORY command - see past commitments
-  if (message.toUpperCase() === 'HISTORY') {
+  // Handle HISTORY command - see past commitments (works anytime)
+  if (upperMessage === 'HISTORY') {
     const { data: pastCommitments } = await supabase
       .from('users')
       .select('*')
@@ -113,6 +69,65 @@ async function handleSetupFlow(phone, message) {
     await sendSMS(normalizedPhone, historyMsg);
     return;
   }
+
+  // Handle HELP command (works anytime)
+  if (upperMessage === 'HELP') {
+    await sendSMS(normalizedPhone, 
+      `Cheengu Commands:\n\n` +
+      `START - Begin a new commitment\n` +
+      `STATUS - Check your current commitment\n` +
+      `HISTORY - See past commitments\n` +
+      `RESET - Cancel setup and start over\n` +
+      `HELP - Show this menu\n\n` +
+      `Questions? Just reply here.`
+    );
+    return;
+  }
+
+  // Check if user already exists and is active
+  const { data: existingUsers, error: userError } = await supabase
+    .from('users')
+    .select('*')
+    .eq('phone', normalizedPhone)
+    .eq('status', 'active');
+  
+  const existingUser = existingUsers && existingUsers.length > 0 ? existingUsers[0] : null;
+  
+  console.log('👤 Existing user check:', existingUser ? existingUser.id : null, userError);
+  
+  if (existingUser && existingUser.status === 'active') {
+    console.log('⚠️ User already has active commitment');
+    await sendSMS(
+      normalizedPhone,
+      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress.'
+    );
+    return;
+  }
+
+  // Get or create setup state
+  let { data: setupState, error: setupError } = await supabase
+    .from('setup_state')
+    .select('*')
+    .eq('phone', normalizedPhone)
+    .single();
+
+  console.log('🔍 Setup state check:', setupState, setupError);
+
+  // Handle RESET command - clear setup state and start fresh
+  if (upperMessage === 'RESET') {
+    if (setupState) {
+      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+      await sendSMS(normalizedPhone, 'Setup cancelled. Text START to begin a new commitment.');
+    } else {
+      await sendSMS(normalizedPhone, 'Nothing to reset. Text START to begin a new commitment.');
+    }
+    return;
+  }
+
+  // Handle START command - begin new setup
+  if (!setupState && upperMessage === 'START') {
+    console.log('✨ Creating new setup state');
+    
     const { data: newState, error: insertError } = await supabase
       .from('setup_state')
       .insert({
@@ -134,20 +149,10 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
+  // No setup state and not a command - prompt to start
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
     await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HELP for available commands.');
-    return;
-  }
-
-  // Handle RESET command - clear setup state and start fresh
-  if (message.toUpperCase() === 'RESET') {
-    if (setupState) {
-      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
-      await sendSMS(normalizedPhone, 'Setup cancelled. Text START to begin a new commitment.');
-    } else {
-      await sendSMS(normalizedPhone, 'Nothing to reset. Text START to begin a new commitment.');
-    }
     return;
   }
 
@@ -399,15 +404,15 @@ async function handleSetupFlow(phone, message) {
   // Handle awaiting_payment state - user hasn't paid yet
   if (setupState.current_step === 'awaiting_payment') {
     // Check if they want to restart
-    if (message.toUpperCase() === 'START') {
+    if (upperMessage === 'START') {
       await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
-      await sendSMS(normalizedPhone, 'Previous setup cleared. Let\'s start fresh!\n\nWhat\'s your commitment?');
+      await sendSMS(normalizedPhone, 'Previous setup cleared. Let\'s start fresh!\n\nWhat\'s your name?\n\n(e.g., Brian)');
       
       await supabase
         .from('setup_state')
         .insert({
           phone: normalizedPhone,
-          current_step: 'awaiting_commitment'
+          current_step: 'awaiting_name'
         });
       return;
     }
