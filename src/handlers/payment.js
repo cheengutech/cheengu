@@ -35,7 +35,7 @@ async function finalizeSetup(phone, paymentIntent = null) {
     endDate.setDate(endDate.getDate() + durationDays);
   }
 
-  const { data: user } = await supabase
+  const { data: user, error: userError } = await supabase
     .from('users')
     .insert({
       phone: normalizedPhone,
@@ -53,6 +53,18 @@ async function finalizeSetup(phone, paymentIntent = null) {
     })
     .select()
     .single();
+
+  if (userError) {
+    console.error('❌ Error creating user:', userError);
+    return;
+  }
+
+  if (!user) {
+    console.error('❌ User insert returned null');
+    return;
+  }
+
+  console.log('✅ User created:', user.id);
 
   // Create judge entry
   await supabase.from('judges').insert({

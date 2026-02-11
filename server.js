@@ -13,17 +13,17 @@ const app = express();
 const cors = require('cors');
 
 app.use(cors({
-  origin: [
-    'https://www.cheengu.com', 
-    'https://cheengu.com',
-    'https://cheengu-v1.onrender.com'  // ← ADD THIS
-  ],
+  origin: ['https://www.cheengu.com', 'https://cheengu.com'],
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Middleware
+// IMPORTANT: Stripe webhook must come BEFORE other body parsers
+app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
+
+// Other middleware (AFTER stripe webhook)
 app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 app.use(express.static('public'));
 
 app.use((req, res, next) => {
@@ -31,17 +31,16 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
 
 // Routes
 app.post('/sms', twilioWebhook);
-app.post('/stripe-webhook', express.raw({ type: 'application/json' }), stripeWebhook);
 app.post('/api/signup', verifyApiKey, triggerStart);
 
 // Serve payment page for any /pay/* route
 app.get('/pay/:paymentIntentId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'pay.html'));
 });
+
 // API endpoint to get payment intent client secret
 app.get('/api/payment-intent/:id', async (req, res) => {
   try {
@@ -135,6 +134,43 @@ app.get('/manual-finalize/:phone', async (req, res) => {
     res.json({ status: 'ok', message: 'Setup finalized! Judge should receive consent request.' });
   } catch (error) {
     console.error('❌ Manual finalize error:', error);
+    res.status(500).json({ error: error.message, stack: error.stack });
+  }
+});
+
+// Test refund endpoint (for testing only - remove in production)
+app.get('/test-end-commitment/:phone', async (req, res) => {
+  const { endCommitment } = require('./src/services/commitment');
+  const { supabase } = require('./src/config/database');
+  const { normalizePhone } = require('./src/utils/phone');
+  
+  try {
+    const phone = normalizePhone(req.params.phone);
+    console.log('🧪 Test end commitment for:', phone);
+    
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', phone)
+      .eq('status', 'active')
+      .single();
+    
+    if (!user) {
+      return res.status(404).json({ error: 'No active commitment found for this phone' });
+    }
+    
+    console.log('📋 User found:', user.id, 'Stake remaining:', user.stake_remaining, 'Payment Intent:', user.payment_intent_id);
+    
+    await endCommitment(user.id, 'manual_test');
+    
+    res.json({ 
+      status: 'ok', 
+      message: 'Commitment ended!',
+      refund_amount: user.stake_remaining,
+      payment_intent_id: user.payment_intent_id
+    });
+  } catch (error) {
+    console.error('❌ Test end commitment error:', error);
     res.status(500).json({ error: error.message, stack: error.stack });
   }
 });

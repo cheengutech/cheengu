@@ -1,6 +1,6 @@
 const { handleSetupFlow } = require('./setup');
 const { handleJudgeResponse, handleJudgeVerification } = require('./judge');
-const { handleMenuCommand, handleMenuResponse } = require('./menu'); // ADD THIS
+const { handleMenuCommand, handleMenuResponse } = require('./menu');
 
 async function twilioWebhook(req, res) {
   const { From: phone, Body: message } = req.body;
@@ -8,22 +8,29 @@ async function twilioWebhook(req, res) {
   console.log(`📨 Received from ${phone}: ${message}`);
 
   try {
-    // Priority: judge consent > MENU > judge verification > setup
+    // Priority: judge consent > MENU (for judges) > HELP (for users) > judge verification > setup
     
     const judgeConsentHandled = await handleJudgeResponse(phone, message);
     if (judgeConsentHandled) {
       return res.status(200).send('<Response></Response>');
     }
 
-    // ADD THIS: Check for menu command
+    // MENU command for judges
     if (message.trim().toUpperCase() === 'MENU') {
       await handleMenuCommand(phone);
       return res.status(200).send('<Response></Response>');
     }
 
-    // ADD THIS: Check if judge is in active menu session
+    // Check if judge is in active menu session
     const menuResponseHandled = await handleMenuResponse(phone, message);
     if (menuResponseHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
+
+    // CMDS, STATUS, HISTORY, RESET commands - route to setup flow
+    const upperMessage = message.trim().toUpperCase();
+    if (upperMessage === 'CMDS' || upperMessage === 'STATUS' || upperMessage === 'HISTORY' || upperMessage === 'RESET') {
+      await handleSetupFlow(phone, message);
       return res.status(200).send('<Response></Response>');
     }
 
