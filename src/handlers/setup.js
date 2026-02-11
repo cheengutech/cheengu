@@ -171,10 +171,10 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
     
-    await sendSMS(
-      normalizedPhone, 
-      `Nice! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} locked in.\n\nLast step: pick your stake. What amount would actually motivate you to follow through?\n\nReply with any amount from $5 to $500:`
-    );
+      await sendSMS(
+        normalizedPhone, 
+        `Nice! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} locked in.\n\nLast step: pick your stake. What amount would actually motivate you to follow through?\n\n${response === 'DAILY' ? 'Each missed day costs 20% of your stake.' : 'Miss the deadline and you lose it all.'}\n\nReply with any amount from $5 to $500:`
+      );
     return;
   }
 
@@ -203,17 +203,17 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
 
-    if (setupState.temp_commitment_type === 'daily') {
-      await sendSMS(
-        normalizedPhone, 
-        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
-      );
-    } else {
-      await sendSMS(
-        normalizedPhone, 
-        `$${stakeAmount} it is! 💪\n\nYour judge will verify on the deadline. Miss it and you lose the full stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
-      );
-    }
+      if (setupState.temp_commitment_type === 'daily') {
+        await sendSMS(
+          normalizedPhone, 
+          `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} (20% of your stake).\n\nHow many days? (Example: 7 for one week, 30 for one month)`
+        );
+      } else {
+        await sendSMS(
+          normalizedPhone, 
+          `$${stakeAmount} it is! 💪\n\nYour judge will verify on the deadline. Miss it and you lose the full stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
+        );
+      }
     return;
   }
 
