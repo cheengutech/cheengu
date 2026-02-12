@@ -6,7 +6,7 @@ const { sendSMS } = require('./sms');
 const { getUserHour, getTodayDate } = require('../utils/timezone');
 const { handleFailure, endCommitment } = require('./commitment');
 
-async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, timezone) {
+async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, timezone, userName) {
   const today = getTodayDate(timezone);
   
   console.log(`🔍 Checking for existing log for user ${userId} on ${today}`);
@@ -46,15 +46,18 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
 
   console.log(`✅ Daily log created:`, newLog);
 
+  // Use name if available, otherwise last 4 digits of phone
+  const displayName = userName || userPhone.slice(-4);
+
   // Ask judge directly
   console.log(`📤 Sending check-in to judge: ${judgePhone}`);
   await sendSMS(
     judgePhone, 
-    `Did ${userPhone} complete today's commitment (${commitmentText})?\n\nReply YES or NO.`
+    `Did ${displayName} complete today's commitment?\n\n"${commitmentText}"\n\nReply YES or NO.`
   );
 }
 
-async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText, deadlineDate) {
+async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText, deadlineDate, userName) {
   console.log(`📅 Sending deadline check-in for ${userId}`);
   
   const { data: newLog, error: insertError } = await supabase
@@ -74,18 +77,22 @@ async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText
 
   console.log(`✅ Deadline log created:`, newLog);
 
+  // Use name if available, otherwise last 4 digits of phone
+  const displayName = userName || userPhone.slice(-4);
+
   // Ask judge about final outcome
   await sendSMS(
     judgePhone,
-    `Did ${userPhone} complete their commitment (${commitmentText}) by the deadline?\n\nReply YES or NO.`
+    `Did ${displayName} complete their commitment by the deadline?\n\n"${commitmentText}"\n\nReply YES or NO.`
   );
 }
 
 function startDailyCronJobs() {
   console.log('⏰ Starting cron jobs...');
 
-  // Run every minute to check for daily commitments at 8pm
-  cron.schedule('* * * * *', async () => {
+  // Run at the top of every hour to check for daily commitments at 8pm in user's timezone
+  cron.schedule('0 * * * *', async () => {
+    console.log('⏰ Hourly check-in job running...');
     try {
       const { data: activeUsers } = await supabase
         .from('users')
@@ -97,13 +104,14 @@ function startDailyCronJobs() {
         if (user.commitment_type === 'daily') {
           const userHour = getUserHour(user.timezone);
           
-          if (userHour === 20) { // 8pm
+          if (userHour === 20) { // 8pm in user's timezone
             await sendDailyCheckIn(
               user.id, 
               user.phone, 
               user.judge_phone,
               user.commitment_text,
-              user.timezone
+              user.timezone,
+              user.user_name
             );
           }
         }
@@ -120,7 +128,8 @@ function startDailyCronJobs() {
               user.phone,
               user.judge_phone,
               user.commitment_text,
-              user.deadline_date
+              user.deadline_date,
+              user.user_name
             );
           }
         }
@@ -136,8 +145,9 @@ function startDailyCronJobs() {
     }
   });
 
-  // 10pm - send FIRST reminder to judges who haven't responded (2 hours after initial)
+  // 10pm UTC - send FIRST reminder to judges who haven't responded
   cron.schedule('0 22 * * *', async () => {
+    console.log('⏰ 10pm reminder job running...');
     try {
       const today = new Date().toISOString().split('T')[0];
       
@@ -149,9 +159,10 @@ function startDailyCronJobs() {
         .is('judge_verified', null);
 
       for (const log of pendingLogs || []) {
+        const displayName = log.users.user_name || log.users.phone.slice(-4);
         await sendSMS(
           log.users.judge_phone,
-          `Reminder: Did ${log.users.phone} complete today's commitment?\n\nReply YES or NO.`
+          `Reminder: Did ${displayName} complete today's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO.`
         );
         console.log(`⏰ Sent 1st reminder to judge: ${log.users.judge_phone}`);
       }
@@ -160,8 +171,9 @@ function startDailyCronJobs() {
     }
   });
 
-  // 12am (midnight) - send SECOND reminder to judges who still haven't responded
+  // 12am (midnight) UTC - send SECOND reminder to judges who still haven't responded
   cron.schedule('0 0 * * *', async () => {
+    console.log('⏰ Midnight reminder job running...');
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);
@@ -175,9 +187,10 @@ function startDailyCronJobs() {
         .is('judge_verified', null);
 
       for (const log of pendingLogs || []) {
+        const displayName = log.users.user_name || log.users.phone.slice(-4);
         await sendSMS(
           log.users.judge_phone,
-          `Final reminder: Did ${log.users.phone} complete yesterday's commitment?\n\nReply YES or NO. Auto-PASS in 2 hours if no response.`
+          `Final reminder: Did ${displayName} complete yesterday's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO. Auto-PASS in 2 hours if no response.`
         );
         console.log(`⏰ Sent 2nd reminder to judge: ${log.users.judge_phone}`);
       }
@@ -186,8 +199,9 @@ function startDailyCronJobs() {
     }
   });
 
-  // 2am - handle no-response from judges after TWO reminders (default to PASS)
+  // 2am UTC - handle no-response from judges after TWO reminders (default to PASS)
   cron.schedule('0 2 * * *', async () => {
+    console.log('⏰ 2am auto-pass job running...');
     try {
       const yesterday = new Date();
       yesterday.setDate(yesterday.getDate() - 1);

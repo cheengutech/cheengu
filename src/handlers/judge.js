@@ -27,12 +27,15 @@ function isValidYesNo(message) {
 async function handleJudgeResponse(phone, message) {
   const normalizedPhone = normalizePhone(phone);
   
-  const { data: judge } = await supabase
+  // Don't use .single() - there might be multiple judge records for this phone
+  const { data: judges } = await supabase
     .from('judges')
     .select('*, users(*)')
     .eq('phone', normalizedPhone)
-    .eq('consent_status', 'pending')
-    .single();
+    .eq('consent_status', 'pending');
+
+  // Get the first pending one (most recent)
+  const judge = judges && judges.length > 0 ? judges[0] : null;
 
   if (!judge) return false;
 
@@ -48,12 +51,32 @@ async function handleJudgeResponse(phone, message) {
       .update({ status: 'active' })
       .eq('id', judge.user_id);
 
+    // Use name if available
+    const userName = judge.users.user_name || 'Your friend';
     const typeText = judge.users.commitment_type === 'daily' 
-      ? 'You\'ll get daily check-in requests.'
+      ? 'You\'ll get daily check-in requests at 8pm.'
       : `You\'ll get one check-in on ${judge.users.deadline_date}.`;
       
-    await sendSMS(normalizedPhone, `You accepted. ${typeText}`);
-    await sendSMS(judge.users.phone, 'Your judge accepted. Your commitment starts now.');
+    await sendSMS(normalizedPhone, `You're now ${userName}'s accountability judge! ${typeText}`);
+    await sendSMS(judge.users.phone, 'Your judge accepted! Your commitment starts now. 💪');
+    return true;
+  }
+
+  if (message.trim().toUpperCase() === 'NO') {
+    await supabase
+      .from('judges')
+      .update({ consent_status: 'declined' })
+      .eq('id', judge.id);
+
+    await supabase
+      .from('users')
+      .update({ status: 'judge_declined' })
+      .eq('id', judge.user_id);
+
+    // TODO: Refund user's stake since judge declined
+      
+    await sendSMS(normalizedPhone, 'No problem. Thanks for letting us know.');
+    await sendSMS(judge.users.phone, 'Your judge declined. Your stake will be refunded. Text START to try again with a different judge.');
     return true;
   }
 
@@ -65,93 +88,111 @@ async function handleJudgeVerification(phone, message) {
   
   console.log('🔍 Checking if judge verification:', normalizedPhone, message);
   
-  const { data: judge } = await supabase
+  // Don't use .single() - there might be multiple judge records for this phone
+  const { data: judges } = await supabase
     .from('judges')
     .select('*, users(*)')
     .eq('phone', normalizedPhone)
-    .eq('consent_status', 'accepted')
-    .single();
+    .eq('consent_status', 'accepted');
 
-  console.log('👨‍⚖️ Judge lookup result:', judge);
+  console.log('👨‍⚖️ Judge lookup result:', judges);
 
-  if (!judge) {
+  if (!judges || judges.length === 0) {
     console.log('❌ Not a judge or not accepted');
     return false;
   }
 
-  const today = getTodayDate(judge.users.timezone);
-  
-  console.log('📅 Looking for pending log on date:', today);
-  
-  const { data: log } = await supabase
-    .from('daily_logs')
-    .select('*')
-    .eq('user_id', judge.user_id)
-    .eq('date', today)
-    .eq('outcome', 'pending')
-    .single();
+  // Check each user this person is judging for pending logs
+  for (const judge of judges) {
+    const today = getTodayDate(judge.users.timezone);
+    
+    console.log('📅 Looking for pending log on date:', today, 'for user:', judge.user_id);
+    
+    const { data: log } = await supabase
+      .from('daily_logs')
+      .select('*')
+      .eq('user_id', judge.user_id)
+      .eq('date', today)
+      .eq('outcome', 'pending')
+      .single();
 
-  console.log('📋 Log lookup result:', log);
+    console.log('📋 Log lookup result:', log);
 
-  if (!log) {
-    console.log('❌ No pending log found for today');
-    return false;
-  }
+    if (!log) {
+      console.log('❌ No pending log found for this user today');
+      continue; // Check next user they're judging
+    }
 
-  if (!isValidYesNo(message)) {
-    console.log('⚠️ Invalid response, must be YES or NO');
-    await sendSMS(normalizedPhone, 'Reply YES or NO only.');
+    if (!isValidYesNo(message)) {
+      console.log('⚠️ Invalid response, must be YES or NO');
+      await sendSMS(normalizedPhone, 'Reply YES or NO only.');
+      return true;
+    }
+
+    const verified = message.trim().toUpperCase() === 'YES';
+    console.log('✅ Judge verified:', verified);
+
+    const userName = judge.users.user_name || judge.users.phone.slice(-4);
+
+    if (verified) {
+      // PASS
+      await supabase
+        .from('daily_logs')
+        .update({
+          judge_verified: true,
+          outcome: 'pass'
+        })
+        .eq('id', log.id);
+
+      await sendSMS(judge.users.phone, '✅ Day verified by your judge! Keep it up! 💪');
+      await sendSMS(normalizedPhone, `✅ Marked ${userName} as PASS for today.`);
+    } else {
+      // FAIL
+      if (judge.users.commitment_type === 'deadline') {
+        // All-or-nothing for deadline
+        await handleDeadlineFailure(judge.users);
+      } else {
+        // Gradual for daily
+        await handleFailure(judge.users, log);
+      }
+      await sendSMS(normalizedPhone, `❌ Marked ${userName} as FAIL for today.`);
+    }
+
     return true;
   }
 
-  const verified = message.trim().toUpperCase() === 'YES';
-  console.log('✅ Judge verified:', verified);
-
-  if (verified) {
-    // PASS
-    await supabase
-      .from('daily_logs')
-      .update({
-        judge_verified: true,
-        outcome: 'pass'
-      })
-      .eq('id', log.id);
-
-    await sendSMS(judge.users.phone, 'Day marked as PASS.');
-  } else {
-    // FAIL
-    if (judge.users.commitment_type === 'deadline') {
-      // All-or-nothing for deadline
-      await handleDeadlineFailure(judge.users);
-    } else {
-      // Gradual for daily
-      await handleFailure(judge.users, log);
-    }
-  }
-
-  return true;
+  // No pending logs found for any user this judge is responsible for
+  console.log('❌ No pending logs found for today');
+  return false;
 }
 
 async function handleDeadlineFailure(user) {
   // All-or-nothing: lose entire stake
+  const lostAmount = user.stake_remaining;
+  
   await supabase
     .from('users')
     .update({ 
       stake_remaining: 0,
-      status: 'completed'
+      status: 'completed',
+      refund_status: 'no_refund',
+      refund_amount: 0
     })
     .eq('id', user.id);
 
-  // Record payout to judge
-  await supabase.from('payouts').insert({
-    judge_phone: user.judge_phone,
-    amount: user.stake_remaining,
-    user_id: user.id,
-    reason: 'Deadline commitment failed'
-  });
+  // Record the failure in daily_logs
+  await supabase
+    .from('daily_logs')
+    .update({
+      judge_verified: true,
+      outcome: 'fail'
+    })
+    .eq('user_id', user.id)
+    .eq('outcome', 'pending');
 
-  await sendSMS(user.phone, `Commitment FAILED. Lost entire stake: $${user.stake_remaining}`);
-  await sendSMS(user.judge_phone, `Commitment FAILED. You earned $${user.stake_remaining}.`);
+  const userName = user.user_name || 'You';
+  await sendSMS(user.phone, `❌ Commitment FAILED. You lost your entire stake: $${lostAmount}`);
+  await sendSMS(user.judge_phone, `${userName}'s commitment is complete. They missed the deadline.`);
 }
 
 module.exports = { handleJudgeResponse, handleJudgeVerification };
