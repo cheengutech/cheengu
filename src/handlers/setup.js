@@ -363,21 +363,26 @@ async function handleSetupFlow(phone, message) {
     }
 
     // Check if this judge is already judging someone else
-    const { data: existingJudge } = await supabase
-      .from('judges')
-      .select('*, users(*)')
-      .eq('phone', judgePhone)
-      .in('consent_status', ['pending', 'accepted']);
+    // Whitelist Brian's number for multiple commitments during onboarding
+    const whitelistedJudges = ['+15622768169'];
     
-    // Filter to only active commitments
-    const activeJudging = existingJudge?.filter(j => 
-      j.users && (j.users.status === 'active' || j.users.status === 'awaiting_judge')
-    );
+    if (!whitelistedJudges.includes(judgePhone)) {
+      const { data: existingJudge } = await supabase
+        .from('judges')
+        .select('*, users(*)')
+        .eq('phone', judgePhone)
+        .in('consent_status', ['pending', 'accepted']);
+      
+      // Filter to only active commitments
+      const activeJudging = existingJudge?.filter(j => 
+        j.users && (j.users.status === 'active' || j.users.status === 'awaiting_judge')
+      );
 
-    if (activeJudging && activeJudging.length > 0) {
-      console.log('⚠️ Judge already has an active commitment');
-      await sendSMS(normalizedPhone, `${judgeName} is already judging someone else's commitment. Please choose a different judge.`);
-      return;
+      if (activeJudging && activeJudging.length > 0) {
+        console.log('⚠️ Judge already has an active commitment');
+        await sendSMS(normalizedPhone, `${judgeName} is already judging someone else's commitment. Please choose a different judge.`);
+        return;
+      }
     }
 
     console.log('👨‍⚖️ Judge name:', judgeName, 'Phone:', judgePhone);
