@@ -58,7 +58,7 @@ async function handleJudgeResponse(phone, message) {
       : `You\'ll get one check-in on ${judge.users.deadline_date}.`;
       
     await sendSMS(normalizedPhone, `You're now ${userName}'s accountability judge! ${typeText}`);
-    await sendSMS(judge.users.phone, 'Your judge accepted! Your commitment starts now. 💪');
+    await sendSMS(judge.users.phone, 'Your judge accepted! Your commitment starts now. 💪\n\nText HOW anytime for help.');
     return true;
   }
 

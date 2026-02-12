@@ -70,15 +70,15 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
-  // Handle CMDS command (works anytime)
-  if (upperMessage === 'CMDS') {
+  // Handle HOW command (works anytime)
+  if (upperMessage === 'HOW') {
     await sendSMS(normalizedPhone, 
       `Cheengu Commands:\n\n` +
       `START - Begin a new commitment\n` +
       `STATUS - Check your current commitment\n` +
       `HISTORY - See past commitments\n` +
-      `RESET - Cancel setup and start over\n` +
-      `CMDS - Show this menu\n\n` +
+      `MENU - Judge someone early\n` +
+      `RESET - Cancel setup and start over\n\n` +
       `Questions? Just reply here.`
     );
     return;
@@ -99,7 +99,7 @@ async function handleSetupFlow(phone, message) {
     console.log('⚠️ User already has active commitment');
     await sendSMS(
       normalizedPhone,
-      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress.'
+      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress, or HOW for help.'
     );
     return;
   }
@@ -123,7 +123,7 @@ async function handleSetupFlow(phone, message) {
       .eq('status', 'active');
     
     if (activeUsers && activeUsers.length > 0) {
-      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress.");
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
       return;
     }
     
@@ -164,7 +164,7 @@ async function handleSetupFlow(phone, message) {
   // No setup state and not a command - prompt to start
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
-    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or CMDS for available commands.');
+    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HOW for help.');
     return;
   }
 
