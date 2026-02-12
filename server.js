@@ -61,6 +61,37 @@ app.get('/api/payment-intent/:id', async (req, res) => {
   }
 });
 
+// Test endpoint to manually trigger a check-in
+app.get('/test-checkin/:phone', async (req, res) => {
+  const { sendDailyCheckIn } = require('./src/services/scheduler');
+  const { supabase } = require('./src/config/database');
+  
+  const phone = '+' + req.params.phone.replace(/\D/g, '');
+  
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('phone', phone)
+    .eq('status', 'active')
+    .single();
+    
+  if (!user) {
+    return res.json({ error: 'No active user found' });
+  }
+  
+  await sendDailyCheckIn(
+    user.id,
+    user.phone,
+    user.judge_phone,
+    user.commitment_text,
+    user.timezone,
+    user.user_name
+  );
+  
+  res.json({ success: true, user: user.user_name });
+});
+
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
