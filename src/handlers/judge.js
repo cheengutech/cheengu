@@ -39,8 +39,10 @@ async function handleJudgeResponse(phone, message) {
 
   if (!judge) return false;
 
+  const upperMessage = message.trim().toUpperCase();
+
   // Case-insensitive check with trim
-  if (message.trim().toUpperCase() === 'YES') {
+  if (upperMessage === 'ACCEPT') {
     await supabase
       .from('judges')
       .update({ consent_status: 'accepted' })
@@ -62,7 +64,7 @@ async function handleJudgeResponse(phone, message) {
     return true;
   }
 
-  if (message.trim().toUpperCase() === 'NO') {
+  if (upperMessage === 'DECLINE') {
     await supabase
       .from('judges')
       .update({ consent_status: 'declined' })
