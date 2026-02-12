@@ -230,10 +230,10 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
     
-      await sendSMS(
-        normalizedPhone, 
-        `Nice! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} locked in.\n\nLast step: pick your stake. What amount would actually motivate you to follow through?\n\n${response === 'DAILY' ? 'Each missed day costs 20% of your stake.' : 'Miss the deadline and you lose it all.'}\n\nReply with any amount from $5 to $500:`
-      );
+    await sendSMS(
+      normalizedPhone, 
+      `Nice! ${response === 'DAILY' ? 'Daily check-ins' : 'One final check-in'} locked in.\n\nLast step: pick your stake. What amount would actually motivate you to follow through?\n\nReply with any amount from $5 to $500:`
+    );
     return;
   }
 
@@ -266,9 +266,15 @@ async function handleSetupFlow(phone, message) {
     if (setupState.temp_commitment_type === 'daily') {
       await sendSMS(
         normalizedPhone, 
-        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm. Each missed day = -$${penalty} from your stake.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
+        `$${stakeAmount} it is! 💪\n\nYour judge will verify every day at 8pm.\n\nHow many days? (Example: 7 for one week, 30 for one month)`
       );
     } else {
+      // For deadline commitments, penalty is the full stake (all or nothing)
+      await supabase
+        .from('setup_state')
+        .update({ temp_penalty_amount: stakeAmount })
+        .eq('phone', normalizedPhone);
+        
       await sendSMS(
         normalizedPhone, 
         `$${stakeAmount} it is! 💪\n\nYour judge will verify on the deadline. Miss it and you lose the full stake.\n\nWhen's your deadline? (Examples: "Jan 31", "2/15", "next Friday")`
@@ -353,6 +359,24 @@ async function handleSetupFlow(phone, message) {
     
     if (!judgePhone || judgePhone.length < 10) {
       await sendSMS(normalizedPhone, "Couldn't read that number. Try again:\n\n(e.g., Brian 562-XXX-XXXX)");
+      return;
+    }
+
+    // Check if this judge is already judging someone else
+    const { data: existingJudge } = await supabase
+      .from('judges')
+      .select('*, users(*)')
+      .eq('phone', judgePhone)
+      .in('consent_status', ['pending', 'accepted']);
+    
+    // Filter to only active commitments
+    const activeJudging = existingJudge?.filter(j => 
+      j.users && (j.users.status === 'active' || j.users.status === 'awaiting_judge')
+    );
+
+    if (activeJudging && activeJudging.length > 0) {
+      console.log('⚠️ Judge already has an active commitment');
+      await sendSMS(normalizedPhone, `${judgeName} is already judging someone else's commitment. Please choose a different judge.`);
       return;
     }
 
