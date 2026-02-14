@@ -79,6 +79,7 @@ async function handleSetupFlow(phone, message) {
       `HISTORY - See past commitments\n` +
       `MENU - Judge someone early\n` +
       `RESET - Cancel setup and start over\n\n` +
+      `📊 Dashboard: cheengu.com/dashboard\n\n` +
       `Questions? Just reply here.`
     );
     return;

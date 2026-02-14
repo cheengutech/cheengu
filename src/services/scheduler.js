@@ -75,7 +75,7 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
   console.log(`📤 Sending reminder to user: ${userPhone}`);
   await sendSMS(
     userPhone,
-    `⏰ Day ${dayNumber} of ${totalDays}\n\n"${commitmentText}"\n\n💰 ${stakeBar} $${user.stake_remaining}/$${user.original_stake}\n\nYour judge is being asked to verify now.\n\nText STATUS or HOW for help.`
+    `⏰ Day ${dayNumber} of ${totalDays}\n\n"${commitmentText}"\n\n💰 ${stakeBar} $${user.stake_remaining}/$${user.original_stake}\n\nYour judge is being asked to verify now.\n\nText STATUS or visit cheengu.com/dashboard`
   );
 
   // Ask judge to verify

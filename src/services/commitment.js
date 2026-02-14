@@ -117,18 +117,18 @@ async function endCommitment(userId, reason) {
   const userName = user.user_name || 'You';
   
   if (reason === 'stake_depleted') {
-    message = `😔 Your stake has been fully depleted.\n\nCommitment ended. Don't give up - text START to try again! 💪`;
+    message = `😔 Your stake has been fully depleted.\n\nCommitment ended. Don't give up - text START to try again! 💪\n\nView history: cheengu.com/dashboard`;
   } else if (refundAmount === originalStake) {
     // Perfect completion - full refund, celebrate!
-    message = `🎉 PERFECT! You crushed it!\n\nFull $${refundAmount} refunded to your card (5-10 business days).\n\nReady for another challenge? Text START!`;
+    message = `🎉 PERFECT! You crushed it!\n\nFull $${refundAmount} refunded to your card (5-10 business days).\n\nView your stats: cheengu.com/dashboard\n\nReady for another challenge? Text START!`;
   } else if (refundAmount > 0) {
     // Partial completion - show what they kept
     const percentKept = Math.round((refundAmount / originalStake) * 100);
     const daysLost = Math.round(totalPenalties / (user.penalty_per_failure || 5));
-    message = `✅ Commitment complete!\n\nYou kept ${percentKept}% of your stake.\n$${refundAmount}/$${originalStake} refunded (5-10 business days).\n\n${daysLost} missed day${daysLost > 1 ? 's' : ''} cost you $${totalPenalties}.\n\nText START to go again!`;
+    message = `✅ Commitment complete!\n\nYou kept ${percentKept}% of your stake.\n$${refundAmount}/$${originalStake} refunded (5-10 business days).\n\n${daysLost} missed day${daysLost > 1 ? 's' : ''} cost you $${totalPenalties}.\n\nView history: cheengu.com/dashboard\n\nText START to go again!`;
   } else {
     // No refund
-    message = `😔 Commitment complete.\n\nYour full stake was lost through missed days.\n\nDon't give up - text START to try again! 💪`;
+    message = `😔 Commitment complete.\n\nYour full stake was lost through missed days.\n\nView history: cheengu.com/dashboard\n\nDon't give up - text START to try again! 💪`;
   }
 
   await sendSMS(user.phone, message);
