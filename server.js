@@ -6,6 +6,8 @@ const stripeWebhook = require('./src/handlers/stripe-webhook');
 const { startDailyCronJobs } = require('./src/services/scheduler');
 const { stripe } = require('./src/config/stripe');
 const { triggerStart, verifyApiKey } = require('./src/routes/signup');
+// Import dashboard routes
+const { sendVerificationCode, verifyCodeAndGetDashboard } = require('./src/routes/dashboard');
 
 
 const app = express();
@@ -205,6 +207,10 @@ app.get('/test-end-commitment/:phone', async (req, res) => {
     res.status(500).json({ error: error.message, stack: error.stack });
   }
 });
+
+// Dashboard API routes
+app.post('/api/dashboard/send-code', sendVerificationCode);
+app.post('/api/dashboard/verify', verifyCodeAndGetDashboard);
 
 // Start cron jobs
 startDailyCronJobs();

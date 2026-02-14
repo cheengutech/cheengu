@@ -9,7 +9,9 @@ const { stripe } = require('../config/stripe');
 async function handleFailure(user, log) {
   // Use the user's custom penalty amount, or default to $5
   const penaltyAmount = user.penalty_per_failure || 5;
-  const newStake = parseFloat(user.stake_remaining) - penaltyAmount;
+  const oldStake = parseFloat(user.stake_remaining);
+  const newStake = oldStake - penaltyAmount;
+  const originalStake = user.original_stake || 20;
   
   await supabase
     .from('daily_logs')
@@ -32,15 +34,22 @@ async function handleFailure(user, log) {
     reason: `Failure on ${log.date}`
   });
 
+  // Build visual stake bars (before and after)
+  const oldPercent = Math.round((oldStake / originalStake) * 10);
+  const newPercent = Math.round((Math.max(0, newStake) / originalStake) * 10);
+  const oldBar = '█'.repeat(oldPercent) + '░'.repeat(10 - oldPercent);
+  const newBar = '█'.repeat(newPercent) + '░'.repeat(10 - newPercent);
+
   await sendSMS(
     user.phone,
-    `Day marked as FAIL. -$${penaltyAmount}. Stake remaining: $${Math.max(0, newStake)}`
+    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HOW for help.`
   );
   
-  // Don't tell judge they "earned" money since we're not paying them out yet
+  // Notify judge
+  const userName = user.user_name || user.phone.slice(-4);
   await sendSMS(
     user.judge_phone,
-    `Verified: ${user.phone} did not complete their commitment today.`
+    `Verified: ${userName} did not complete their commitment today.`
   );
 
   if (newStake <= 0) {
@@ -105,26 +114,30 @@ async function endCommitment(userId, reason) {
 
   // Send completion message based on reason and outcome
   let message;
+  const userName = user.user_name || 'You';
   
   if (reason === 'stake_depleted') {
-    message = `Your stake has been fully depleted. Commitment ended. Keep going next time! 💪`;
+    message = `😔 Your stake has been fully depleted.\n\nCommitment ended. Don't give up - text START to try again! 💪`;
   } else if (refundAmount === originalStake) {
-    // Perfect completion - full refund
-    message = `🎉 Congratulations! You completed your commitment with a perfect record!\n\nYour full $${refundAmount} stake is being refunded to your card (5-10 business days).`;
+    // Perfect completion - full refund, celebrate!
+    message = `🎉 PERFECT! You crushed it!\n\nFull $${refundAmount} refunded to your card (5-10 business days).\n\nReady for another challenge? Text START!`;
   } else if (refundAmount > 0) {
-    // Partial completion
-    message = `Your commitment is complete!\n\nYou missed ${Math.round(totalPenalties / (user.penalty_per_failure || 5))} day(s), so $${refundAmount} of your $${originalStake} stake is being refunded to your card (5-10 business days).`;
+    // Partial completion - show what they kept
+    const percentKept = Math.round((refundAmount / originalStake) * 100);
+    const daysLost = Math.round(totalPenalties / (user.penalty_per_failure || 5));
+    message = `✅ Commitment complete!\n\nYou kept ${percentKept}% of your stake.\n$${refundAmount}/$${originalStake} refunded (5-10 business days).\n\n${daysLost} missed day${daysLost > 1 ? 's' : ''} cost you $${totalPenalties}.\n\nText START to go again!`;
   } else {
-    // No refund (stake depleted through this path shouldn't happen, but just in case)
-    message = `Your commitment is complete. Your full stake was used up through missed days. Next time! 💪`;
+    // No refund
+    message = `😔 Commitment complete.\n\nYour full stake was lost through missed days.\n\nDon't give up - text START to try again! 💪`;
   }
 
   await sendSMS(user.phone, message);
   
   // Notify judge that commitment ended
+  const judgeName = user.judge_name || 'Judge';
   await sendSMS(
     user.judge_phone,
-    `${user.phone}'s commitment has ended. Thanks for being their accountability partner! 🙏`
+    `${userName}'s commitment has ended. Thanks for being their accountability partner! 🙏`
   );
 }
 

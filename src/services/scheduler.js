@@ -27,6 +27,24 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
     return;
   }
 
+  // Get user data for day counting and stake info
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (!user) {
+    console.error('❌ User not found:', userId);
+    return;
+  }
+
+  // Calculate which day they're on
+  const startDate = new Date(user.commitment_start_date);
+  const todayDate = new Date(today);
+  const dayNumber = Math.floor((todayDate - startDate) / (1000 * 60 * 60 * 24)) + 1;
+  const totalDays = Math.ceil((new Date(user.commitment_end_date) - startDate) / (1000 * 60 * 60 * 24));
+
   console.log(`📝 Creating new daily log for ${today}`);
   
   const { data: newLog, error: insertError } = await supabase
@@ -49,7 +67,18 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
   // Use name if available, otherwise last 4 digits of phone
   const displayName = userName || userPhone.slice(-4);
 
-  // Ask judge directly
+  // Build stake visual (e.g., ████████░░ $17/$20)
+  const stakePercent = Math.round((user.stake_remaining / user.original_stake) * 10);
+  const stakeBar = '█'.repeat(stakePercent) + '░'.repeat(10 - stakePercent);
+
+  // Send reminder to user with day counter and stake visual
+  console.log(`📤 Sending reminder to user: ${userPhone}`);
+  await sendSMS(
+    userPhone,
+    `⏰ Day ${dayNumber} of ${totalDays}\n\n"${commitmentText}"\n\n💰 ${stakeBar} $${user.stake_remaining}/$${user.original_stake}\n\nYour judge is being asked to verify now.\n\nText STATUS or HOW for help.`
+  );
+
+  // Ask judge to verify
   console.log(`📤 Sending check-in to judge: ${judgePhone}`);
   await sendSMS(
     judgePhone, 
@@ -79,6 +108,12 @@ async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText
 
   // Use name if available, otherwise last 4 digits of phone
   const displayName = userName || userPhone.slice(-4);
+
+  // Send reminder to user
+  await sendSMS(
+    userPhone,
+    `⏰ Deadline day!\n\n"${commitmentText}"\n\nYour judge is being asked to verify now.\n\nText STATUS to check progress or HOW for help.`
+  );
 
   // Ask judge about final outcome
   await sendSMS(
