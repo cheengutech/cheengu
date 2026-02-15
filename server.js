@@ -33,6 +33,16 @@ app.use((req, res, next) => {
   next();
 });
 
+//logging right before the stripe webhook
+app.post('/stripe-webhook', 
+  (req, res, next) => {
+    console.log('🔔 Before raw - Body type:', typeof req.body);
+    console.log('🔔 Before raw - Is Buffer:', Buffer.isBuffer(req.body));
+    next();
+  },
+  express.raw({ type: 'application/json' }), 
+  stripeWebhook
+);
 
 // Routes
 app.post('/sms', twilioWebhook);
