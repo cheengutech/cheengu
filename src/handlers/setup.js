@@ -78,7 +78,8 @@ async function handleSetupFlow(phone, message) {
       `STATUS - Check your current commitment\n` +
       `HISTORY - See past commitments\n` +
       `MENU - Judge someone early\n` +
-      `RESET - Cancel setup and start over\n\n` +
+      `RESET - Cancel setup and start over\n` +
+      `UNDO - Judge: fix a mistake (5 min window)\n\n` +
       `📊 Dashboard: cheengu.com/dashboard\n\n` +
       `Questions? Just reply here.`
     );
