@@ -5,6 +5,10 @@ const { sendSMS } = require('../services/sms');
 const { handleFailure } = require('../services/commitment');
 const { getTodayDate } = require('../utils/timezone');
 
+// Store recent verifications for UNDO (phone -> { logId, outcome, userId, timestamp })
+const recentVerifications = new Map();
+const UNDO_WINDOW = 5 * 60 * 1000; // 5 minutes
+
 function normalizePhone(phone) {
   // Remove all non-digits
   const digits = phone.replace(/\D/g, '');
@@ -85,8 +89,73 @@ async function handleJudgeResponse(phone, message) {
   return false;
 }
 
+async function handleJudgeUndo(phone) {
+  const normalizedPhone = normalizePhone(phone);
+  
+  const recent = recentVerifications.get(normalizedPhone);
+  
+  if (!recent) {
+    await sendSMS(normalizedPhone, "Nothing to undo. You haven't verified anyone recently.");
+    return true;
+  }
+  
+  // Check if within undo window
+  if (Date.now() - recent.timestamp > UNDO_WINDOW) {
+    recentVerifications.delete(normalizedPhone);
+    await sendSMS(normalizedPhone, "Too late to undo - the 5 minute window has passed.");
+    return true;
+  }
+  
+  // Get user info for messaging
+  const { data: user } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', recent.userId)
+    .single();
+  
+  if (!user) {
+    await sendSMS(normalizedPhone, "Error: Could not find the commitment to undo.");
+    return true;
+  }
+  
+  const userName = user.user_name || user.phone.slice(-4);
+  
+  // If it was a FAIL, we need to restore the stake
+  if (recent.outcome === 'fail') {
+    const penaltyAmount = user.penalty_per_failure || 5;
+    await supabase
+      .from('users')
+      .update({ stake_remaining: parseFloat(user.stake_remaining) + penaltyAmount })
+      .eq('id', user.id);
+  }
+  
+  // Reset the log to pending
+  await supabase
+    .from('daily_logs')
+    .update({
+      judge_verified: null,
+      outcome: 'pending'
+    })
+    .eq('id', recent.logId);
+  
+  // Clear the undo record
+  recentVerifications.delete(normalizedPhone);
+  
+  // Notify and ask again
+  await sendSMS(normalizedPhone, `Undone! Did ${userName} complete today's commitment?\n\n"${user.commitment_text}"\n\nReply YES or NO.`);
+  await sendSMS(user.phone, "Your judge is re-verifying today's check-in.");
+  
+  return true;
+}
+
 async function handleJudgeVerification(phone, message) {
   const normalizedPhone = normalizePhone(phone);
+  const upperMessage = message.trim().toUpperCase();
+  
+  // Check for UNDO command
+  if (upperMessage === 'UNDO') {
+    return await handleJudgeUndo(phone);
+  }
   
   console.log('🔍 Checking if judge verification:', normalizedPhone, message);
   
@@ -146,8 +215,16 @@ async function handleJudgeVerification(phone, message) {
         })
         .eq('id', log.id);
 
+      // Store for potential UNDO
+      recentVerifications.set(normalizedPhone, {
+        logId: log.id,
+        outcome: 'pass',
+        userId: judge.user_id,
+        timestamp: Date.now()
+      });
+
       await sendSMS(judge.users.phone, '✅ Day verified by your judge! Keep it up! 💪');
-      await sendSMS(normalizedPhone, `✅ Marked ${userName} as PASS for today.`);
+      await sendSMS(normalizedPhone, `✅ Marked ${userName} as PASS for today.\n\nMade a mistake? Reply UNDO in the next 5 minutes.`);
     } else {
       // FAIL
       if (judge.users.commitment_type === 'deadline') {
@@ -157,7 +234,16 @@ async function handleJudgeVerification(phone, message) {
         // Gradual for daily
         await handleFailure(judge.users, log);
       }
-      await sendSMS(normalizedPhone, `❌ Marked ${userName} as FAIL for today.`);
+      
+      // Store for potential UNDO
+      recentVerifications.set(normalizedPhone, {
+        logId: log.id,
+        outcome: 'fail',
+        userId: judge.user_id,
+        timestamp: Date.now()
+      });
+      
+      await sendSMS(normalizedPhone, `❌ Marked ${userName} as FAIL for today.\n\nMade a mistake? Reply UNDO in the next 5 minutes.`);
     }
 
     return true;
