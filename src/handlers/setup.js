@@ -98,7 +98,10 @@ async function handleSetupFlow(phone, message) {
   
   console.log('👤 Existing user check:', existingUser ? existingUser.id : null, userError);
   
-  if (existingUser && existingUser.status === 'active') {
+  // Whitelist for users who can have multiple active commitments (for testing)
+  const whitelistedUsers = ['+15622768169'];
+  
+  if (existingUser && existingUser.status === 'active' && !whitelistedUsers.includes(normalizedPhone)) {
     console.log('⚠️ User already has active commitment');
     await sendSMS(
       normalizedPhone,
