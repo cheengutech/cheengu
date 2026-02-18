@@ -470,6 +470,7 @@ async function handleSetupFlow(phone, message) {
 function parseDeadlineDate(input) {
   const cleaned = input.trim().toLowerCase();
   const now = new Date();
+  const currentYear = now.getFullYear();
   
   // Handle "next [day]"
   if (cleaned.includes('next')) {
@@ -485,7 +486,80 @@ function parseDeadlineDate(input) {
     }
   }
   
-  // Try parsing as date
+  // Handle MM/DD format (e.g., 04/30, 4/30)
+  const slashMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (slashMatch) {
+    const month = parseInt(slashMatch[1]) - 1; // JS months are 0-indexed
+    const day = parseInt(slashMatch[2]);
+    let year = currentYear;
+    
+    // If the date has passed this year, assume next year
+    const testDate = new Date(year, month, day);
+    if (testDate < now) {
+      year++;
+    }
+    
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  }
+  
+  // Handle "Mon DD" or "Month DD" format (e.g., Apr 30, April 30, Mar 30)
+  const months = {
+    'jan': 0, 'january': 0,
+    'feb': 1, 'february': 1,
+    'mar': 2, 'march': 2,
+    'apr': 3, 'april': 3,
+    'may': 4,
+    'jun': 5, 'june': 5,
+    'jul': 6, 'july': 6,
+    'aug': 7, 'august': 7,
+    'sep': 8, 'sept': 8, 'september': 8,
+    'oct': 9, 'october': 9,
+    'nov': 10, 'november': 10,
+    'dec': 11, 'december': 11
+  };
+  
+  const monthMatch = cleaned.match(/^([a-z]+)\s*(\d{1,2})$/);
+  if (monthMatch) {
+    const monthStr = monthMatch[1];
+    const day = parseInt(monthMatch[2]);
+    const month = months[monthStr];
+    
+    if (month !== undefined) {
+      let year = currentYear;
+      const testDate = new Date(year, month, day);
+      if (testDate < now) {
+        year++;
+      }
+      
+      const date = new Date(year, month, day);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+    }
+  }
+  
+  // Handle MM-DD format (e.g., 04-30)
+  const dashMatch = cleaned.match(/^(\d{1,2})-(\d{1,2})$/);
+  if (dashMatch) {
+    const month = parseInt(dashMatch[1]) - 1;
+    const day = parseInt(dashMatch[2]);
+    let year = currentYear;
+    
+    const testDate = new Date(year, month, day);
+    if (testDate < now) {
+      year++;
+    }
+    
+    const date = new Date(year, month, day);
+    if (!isNaN(date.getTime())) {
+      return date.toISOString().split('T')[0];
+    }
+  }
+  
+  // Try parsing as full date string (last resort)
   const parsed = new Date(input);
   if (!isNaN(parsed.getTime()) && parsed > now) {
     return parsed.toISOString().split('T')[0];
