@@ -486,6 +486,48 @@ function parseDeadlineDate(input) {
     }
   }
   
+  // Handle duration formats: "X days", "X weeks", "X months"
+  const durationMatch = cleaned.match(/^(\d+)\s*(day|days|week|weeks|month|months)$/);
+  if (durationMatch) {
+    const num = parseInt(durationMatch[1]);
+    const unit = durationMatch[2];
+    const date = new Date(now);
+    
+    if (unit.startsWith('day')) {
+      date.setDate(date.getDate() + num);
+    } else if (unit.startsWith('week')) {
+      date.setDate(date.getDate() + (num * 7));
+    } else if (unit.startsWith('month')) {
+      date.setMonth(date.getMonth() + num);
+    }
+    
+    return date.toISOString().split('T')[0];
+  }
+  
+  // Handle word numbers: "one week", "two weeks", "three months", etc.
+  const wordNumbers = {
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+    'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+    'eleven': 11, 'twelve': 12
+  };
+  
+  const wordDurationMatch = cleaned.match(/^(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(day|days|week|weeks|month|months)$/);
+  if (wordDurationMatch) {
+    const num = wordNumbers[wordDurationMatch[1]];
+    const unit = wordDurationMatch[2];
+    const date = new Date(now);
+    
+    if (unit.startsWith('day')) {
+      date.setDate(date.getDate() + num);
+    } else if (unit.startsWith('week')) {
+      date.setDate(date.getDate() + (num * 7));
+    } else if (unit.startsWith('month')) {
+      date.setMonth(date.getMonth() + num);
+    }
+    
+    return date.toISOString().split('T')[0];
+  }
+  
   // Handle MM/DD format (e.g., 04/30, 4/30)
   const slashMatch = cleaned.match(/^(\d{1,2})\/(\d{1,2})$/);
   if (slashMatch) {
