@@ -13,6 +13,52 @@ async function handleSetupFlow(phone, message) {
   console.log('📞 Normalized phone:', normalizedPhone);
   
   const upperMessage = message.trim().toUpperCase();
+  const lowerMessage = message.trim().toLowerCase();
+
+  // Keyword matching for common command variations
+  if (lowerMessage.includes('cancel') || lowerMessage.includes('stop') || lowerMessage === 'quit') {
+    // Treat as RESET
+    const { data: activeUsers } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .eq('status', 'active');
+    
+    if (activeUsers && activeUsers.length > 0) {
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
+      return;
+    }
+    
+    const { data: setupToCancel } = await supabase
+      .from('setup_state')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .single();
+    
+    if (setupToCancel) {
+      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+      await sendSMS(normalizedPhone, 'Setup cancelled. Text START to begin a new commitment.');
+    } else {
+      await sendSMS(normalizedPhone, 'Nothing to cancel. Text START to begin a new commitment.');
+    }
+    return;
+  }
+  
+  if (lowerMessage === 'help' || lowerMessage === 'commands' || lowerMessage === '?') {
+    // Treat as HOW
+    await sendSMS(normalizedPhone, 
+      `Cheengu Commands:\n\n` +
+      `START - Begin a new commitment\n` +
+      `STATUS - Check your current commitment\n` +
+      `HISTORY - See past commitments\n` +
+      `MENU - Judge someone early\n` +
+      `RESET - Cancel setup and start over\n` +
+      `UNDO - Judge: fix a mistake (5 min window)\n\n` +
+      `📊 Dashboard: cheengu.com/dashboard\n\n` +
+      `Questions? Just reply here.`
+    );
+    return;
+  }
 
   // Handle STATUS command - check current commitment (works anytime)
   if (upperMessage === 'STATUS') {
@@ -220,29 +266,18 @@ async function handleSetupFlow(phone, message) {
   if (setupState.current_step === 'awaiting_commitment_type') {
     let response = message.trim().toUpperCase();
     
-    // Check for simple responses first
-    if (response !== 'DAILY' && response !== 'DEADLINE' && response !== '1' && response !== '2') {
-      // Try AI interpreter
-      if (needsInterpretation(message, 'awaiting_commitment_type')) {
-        console.log('🤖 Trying AI interpreter for commitment type...');
-        const aiResult = await interpretInput(message, 'awaiting_commitment_type');
-        
-        if (aiResult.success) {
-          response = aiResult.value.toUpperCase();
-          console.log('🤖 AI parsed commitment type:', response);
-        } else {
-          await sendSMS(normalizedPhone, aiResult.clarification);
-          return;
-        }
-      } else {
-        await sendSMS(normalizedPhone, 'Reply DAILY for daily check-ins or DEADLINE for a one-time deadline.');
-        return;
-      }
-    }
+    // Keyword matching for common variations
+    const dailyKeywords = ['DAILY', '1', 'EVERYDAY', 'EVERY DAY', 'EACH DAY'];
+    const deadlineKeywords = ['DEADLINE', '2', 'ONE TIME', 'ONCE', 'BY DATE', 'END DATE'];
     
-    // Map 1/2 to DAILY/DEADLINE
-    if (response === '1') response = 'DAILY';
-    if (response === '2') response = 'DEADLINE';
+    if (dailyKeywords.includes(response)) {
+      response = 'DAILY';
+    } else if (deadlineKeywords.includes(response)) {
+      response = 'DEADLINE';
+    } else {
+      await sendSMS(normalizedPhone, 'Reply DAILY for daily check-ins or DEADLINE for a one-time deadline.');
+      return;
+    }
 
     console.log('📅 Commitment type selected:', response);
 
@@ -409,35 +444,28 @@ async function handleSetupFlow(phone, message) {
   if (setupState.current_step === 'awaiting_judge_phone') {
     console.log('👨‍⚖️ Processing judge info:', message);
     
+    // Check for "I don't have anyone" type responses
+    const noJudgeKeywords = ['don\'t have', 'dont have', 'no one', 'nobody', 'alone', 'by myself'];
+    if (noJudgeKeywords.some(kw => message.toLowerCase().includes(kw))) {
+      await sendSMS(normalizedPhone, "You need someone to verify your commitment. Think of a friend, family member, or coworker who can check in on you.\n\nSend their name and number:\n(e.g., Mike 555-123-4567)");
+      return;
+    }
+    
     // Parse name and phone from input like "Justin 818-480-8293" or "Justin 8184808293"
     const parts = message.trim().split(/\s+/);
     
-    let judgeName, judgePhone;
-    
     if (parts.length < 2) {
-      // Try AI interpreter for things like "my friend mike 5551234567"
-      if (needsInterpretation(message, 'awaiting_judge_phone')) {
-        console.log('🤖 Trying AI interpreter for judge info...');
-        const aiResult = await interpretInput(message, 'awaiting_judge_phone');
-        
-        if (aiResult.success && aiResult.value.name && aiResult.value.phone) {
-          judgeName = aiResult.value.name;
-          judgePhone = normalizePhone(aiResult.value.phone);
-          console.log('🤖 AI parsed judge:', judgeName, judgePhone);
-        } else {
-          await sendSMS(normalizedPhone, aiResult.clarification || "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
-          return;
-        }
-      } else {
-        await sendSMS(normalizedPhone, "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
-        return;
-      }
-    } else {
-      // Last part is the phone number, everything before is the name
-      const phonepart = parts[parts.length - 1];
-      judgeName = parts.slice(0, -1).join(' ');
-      judgePhone = normalizePhone(phonepart);
+      await sendSMS(normalizedPhone, "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
+      return;
     }
+    
+    // Last part is the phone number, everything before is the name
+    const phonepart = parts[parts.length - 1];
+    let judgeName = parts.slice(0, -1).join(' ');
+    const judgePhone = normalizePhone(phonepart);
+    
+    // Clean up name (remove ? and other punctuation)
+    judgeName = judgeName.replace(/[?!.,]/g, '').trim();
     
     if (judgePhone === normalizedPhone) {
       console.log('⚠️ User tried to be their own judge');
