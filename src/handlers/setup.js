@@ -4,6 +4,7 @@ const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { normalizePhone } = require('../utils/phone');
 const { stripe } = require('../config/stripe');
+const { interpretInput, needsInterpretation } = require('../services/interpreter');
 
 async function handleSetupFlow(phone, message) {
   console.log('🔧 handleSetupFlow called with:', phone, message);
@@ -214,12 +215,31 @@ async function handleSetupFlow(phone, message) {
   }
 
   if (setupState.current_step === 'awaiting_commitment_type') {
-    const response = message.toUpperCase();
+    let response = message.trim().toUpperCase();
     
-    if (response !== 'DAILY' && response !== 'DEADLINE') {
-      await sendSMS(normalizedPhone, 'Please reply with either DAILY or DEADLINE.');
-      return;
+    // Check for simple responses first
+    if (response !== 'DAILY' && response !== 'DEADLINE' && response !== '1' && response !== '2') {
+      // Try AI interpreter
+      if (needsInterpretation(message, 'awaiting_commitment_type')) {
+        console.log('🤖 Trying AI interpreter for commitment type...');
+        const aiResult = await interpretInput(message, 'awaiting_commitment_type');
+        
+        if (aiResult.success) {
+          response = aiResult.value.toUpperCase();
+          console.log('🤖 AI parsed commitment type:', response);
+        } else {
+          await sendSMS(normalizedPhone, aiResult.clarification);
+          return;
+        }
+      } else {
+        await sendSMS(normalizedPhone, 'Reply DAILY for daily check-ins or DEADLINE for a one-time deadline.');
+        return;
+      }
     }
+    
+    // Map 1/2 to DAILY/DEADLINE
+    if (response === '1') response = 'DAILY';
+    if (response === '2') response = 'DEADLINE';
 
     console.log('📅 Commitment type selected:', response);
 
@@ -243,11 +263,25 @@ async function handleSetupFlow(phone, message) {
   if (setupState.current_step === 'awaiting_stake_amount') {
     // Remove $ sign if present and parse
     const cleanedMessage = message.replace('$', '').trim();
-    const stakeAmount = parseInt(cleanedMessage);
+    let stakeAmount = parseInt(cleanedMessage);
     
     if (isNaN(stakeAmount) || stakeAmount < 5 || stakeAmount > 500) {
-      await sendSMS(normalizedPhone, 'Please enter an amount between $5 and $500.');
-      return;
+      // Try AI interpreter for things like "twenty bucks", "fifty dollars"
+      if (needsInterpretation(message, 'awaiting_stake_amount')) {
+        console.log('🤖 Trying AI interpreter for stake amount...');
+        const aiResult = await interpretInput(message, 'awaiting_stake_amount');
+        
+        if (aiResult.success && aiResult.value >= 5 && aiResult.value <= 500) {
+          stakeAmount = aiResult.value;
+          console.log('🤖 AI parsed stake amount:', stakeAmount);
+        } else {
+          await sendSMS(normalizedPhone, aiResult.clarification || 'Please enter an amount between $5 and $500.');
+          return;
+        }
+      } else {
+        await sendSMS(normalizedPhone, 'Please enter an amount between $5 and $500.');
+        return;
+      }
     }
 
     console.log('💰 Stake amount selected:', stakeAmount);
@@ -286,11 +320,25 @@ async function handleSetupFlow(phone, message) {
   }
 
   if (setupState.current_step === 'awaiting_duration') {
-    const days = parseInt(message);
+    let days = parseInt(message);
     
     if (isNaN(days) || days < 1 || days > 90) {
-      await sendSMS(normalizedPhone, 'Please enter a number between 1 and 90 days.');
-      return;
+      // Try AI interpreter for things like "a week", "two weeks", "one month"
+      if (needsInterpretation(message, 'awaiting_duration')) {
+        console.log('🤖 Trying AI interpreter for duration...');
+        const aiResult = await interpretInput(message, 'awaiting_duration');
+        
+        if (aiResult.success && aiResult.value >= 1 && aiResult.value <= 90) {
+          days = aiResult.value;
+          console.log('🤖 AI parsed duration:', days);
+        } else {
+          await sendSMS(normalizedPhone, aiResult.clarification || 'Please enter a number between 1 and 90 days.');
+          return;
+        }
+      } else {
+        await sendSMS(normalizedPhone, 'Please enter a number between 1 and 90 days.');
+        return;
+      }
     }
 
     console.log('📆 Duration set:', days, 'days');
@@ -318,10 +366,24 @@ async function handleSetupFlow(phone, message) {
   if (setupState.current_step === 'awaiting_deadline_date') {
     console.log('📆 Processing deadline date:', message);
     
-    const parsedDate = parseDeadlineDate(message);
+    let parsedDate = parseDeadlineDate(message);
+    
+    // If parser failed, try AI interpreter
+    if (!parsedDate && needsInterpretation(message, 'awaiting_deadline_date')) {
+      console.log('🤖 Trying AI interpreter for deadline date...');
+      const aiResult = await interpretInput(message, 'awaiting_deadline_date');
+      
+      if (aiResult.success) {
+        parsedDate = aiResult.value;
+        console.log('🤖 AI parsed deadline date:', parsedDate);
+      } else {
+        await sendSMS(normalizedPhone, aiResult.clarification);
+        return;
+      }
+    }
     
     if (!parsedDate) {
-      await sendSMS(normalizedPhone, 'Hmm, couldn\'t understand that date. Try something like: Jan 31, 2/15, or next Friday');
+      await sendSMS(normalizedPhone, "When's your deadline? (e.g., Apr 30, 5 weeks, next Friday)");
       return;
     }
 
@@ -333,7 +395,11 @@ async function handleSetupFlow(phone, message) {
       })
       .eq('phone', normalizedPhone);
     
-    await sendSMS(normalizedPhone, `Deadline set! 📅\n\nWho's going to keep you honest? Send their name and number:\n\n(e.g., Brian 562-XXX-XXXX)`);
+    // Format date nicely for confirmation
+    const dateObj = new Date(parsedDate);
+    const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    
+    await sendSMS(normalizedPhone, `Deadline set for ${formattedDate}! 📅\n\nWho's going to keep you honest? Send their name and number:\n\n(e.g., Brian 562-XXX-XXXX)`);
     return;
   }
 
@@ -343,15 +409,32 @@ async function handleSetupFlow(phone, message) {
     // Parse name and phone from input like "Justin 818-480-8293" or "Justin 8184808293"
     const parts = message.trim().split(/\s+/);
     
-    if (parts.length < 2) {
-      await sendSMS(normalizedPhone, "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
-      return;
-    }
+    let judgeName, judgePhone;
     
-    // Last part is the phone number, everything before is the name
-    const phonepart = parts[parts.length - 1];
-    const judgeName = parts.slice(0, -1).join(' ');
-    const judgePhone = normalizePhone(phonepart);
+    if (parts.length < 2) {
+      // Try AI interpreter for things like "my friend mike 5551234567"
+      if (needsInterpretation(message, 'awaiting_judge_phone')) {
+        console.log('🤖 Trying AI interpreter for judge info...');
+        const aiResult = await interpretInput(message, 'awaiting_judge_phone');
+        
+        if (aiResult.success && aiResult.value.name && aiResult.value.phone) {
+          judgeName = aiResult.value.name;
+          judgePhone = normalizePhone(aiResult.value.phone);
+          console.log('🤖 AI parsed judge:', judgeName, judgePhone);
+        } else {
+          await sendSMS(normalizedPhone, aiResult.clarification || "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
+          return;
+        }
+      } else {
+        await sendSMS(normalizedPhone, "Please include both name and number.\n\n(e.g., Brian 562-XXX-XXXX)");
+        return;
+      }
+    } else {
+      // Last part is the phone number, everything before is the name
+      const phonepart = parts[parts.length - 1];
+      judgeName = parts.slice(0, -1).join(' ');
+      judgePhone = normalizePhone(phonepart);
+    }
     
     if (judgePhone === normalizedPhone) {
       console.log('⚠️ User tried to be their own judge');

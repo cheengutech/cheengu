@@ -4,6 +4,7 @@ const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { handleFailure } = require('../services/commitment');
 const { getTodayDate } = require('../utils/timezone');
+const { interpretInput, needsInterpretation } = require('../services/interpreter');
 
 // Store recent verifications for UNDO (phone -> { logId, outcome, userId, timestamp })
 const recentVerifications = new Map();
@@ -195,9 +196,23 @@ async function handleJudgeVerification(phone, message) {
     }
 
     if (!isValidYesNo(message)) {
-      console.log('⚠️ Invalid response, must be YES or NO');
-      await sendSMS(normalizedPhone, 'Reply YES or NO only.');
-      return true;
+      // Try AI interpreter for things like "yep", "he did it", "nope didn't happen"
+      if (needsInterpretation(message, 'judge_verification')) {
+        console.log('🤖 Trying AI interpreter for judge verification...');
+        const aiResult = await interpretInput(message, 'judge_verification');
+        
+        if (aiResult.success) {
+          message = aiResult.value; // Will be "YES" or "NO"
+          console.log('🤖 AI parsed verification:', message);
+        } else {
+          await sendSMS(normalizedPhone, aiResult.clarification || 'Reply YES or NO only.');
+          return true;
+        }
+      } else {
+        console.log('⚠️ Invalid response, must be YES or NO');
+        await sendSMS(normalizedPhone, 'Reply YES or NO only.');
+        return true;
+      }
     }
 
     const verified = message.trim().toUpperCase() === 'YES';
