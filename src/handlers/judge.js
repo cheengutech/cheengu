@@ -266,6 +266,13 @@ async function handleJudgeVerification(phone, message) {
 
   // No pending logs found for any user this judge is responsible for
   console.log('❌ No pending logs found for today');
+  
+  // If they sent YES/NO but there's nothing to verify, let them know
+  if (upperMessage === 'YES' || upperMessage === 'NO') {
+    await sendSMS(normalizedPhone, "No pending check-ins to verify right now. You may have already responded today.");
+    return true;
+  }
+  
   return false;
 }
 
