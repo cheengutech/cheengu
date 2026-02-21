@@ -271,6 +271,41 @@ function startDailyCronJobs() {
     }
   });
 
+  // 9am PST (5pm UTC) - Daily refund report to admin
+  const ADMIN_PHONE = '+15622768169';
+  
+  cron.schedule('0 17 * * *', async () => {
+    console.log('📊 Running daily refund report...');
+    try {
+      const { data: pendingRefunds } = await supabase
+        .from('users')
+        .select('*')
+        .eq('status', 'completed')
+        .gt('stake_remaining', 0)
+        .or('refund_status.is.null,refund_status.eq.pending');
+      
+      if (!pendingRefunds || pendingRefunds.length === 0) {
+        console.log('✅ No pending refunds');
+        return;
+      }
+      
+      let report = `💰 Refunds needed (${pendingRefunds.length}):\n\n`;
+      
+      for (const user of pendingRefunds) {
+        const name = user.user_name || user.phone.slice(-4);
+        const pi = user.payment_intent_id ? `...${user.payment_intent_id.slice(-8)}` : 'NO PI';
+        report += `• ${name}: $${user.stake_remaining} (${pi})\n`;
+      }
+      
+      report += `\nProcess in Stripe Dashboard.`;
+      
+      await sendSMS(ADMIN_PHONE, report);
+      console.log('📤 Refund report sent to admin');
+    } catch (error) {
+      console.error('Error in refund report job:', error);
+    }
+  });
+
   console.log('✅ Cron jobs started');
 }
 
