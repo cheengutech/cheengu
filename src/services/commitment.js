@@ -37,8 +37,8 @@ async function handleFailure(user, log) {
   // Build visual stake bars (before and after)
   const oldPercent = Math.round((oldStake / originalStake) * 10);
   const newPercent = Math.round((Math.max(0, newStake) / originalStake) * 10);
-  const oldBar = '█'.repeat(oldPercent) + '░'.repeat(10 - oldPercent);
-  const newBar = '█'.repeat(newPercent) + '░'.repeat(10 - newPercent);
+  const oldBar = '🟩'.repeat(oldPercent) + '⬜'.repeat(10 - oldPercent);
+  const newBar = '🟩'.repeat(newPercent) + '⬜'.repeat(10 - newPercent);
 
   await sendSMS(
     user.phone,

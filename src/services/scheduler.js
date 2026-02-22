@@ -67,9 +67,9 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
   // Use name if available, otherwise last 4 digits of phone
   const displayName = userName || userPhone.slice(-4);
 
-  // Build stake visual (e.g., ████████░░ $17/$20)
+  // Build stake visual (e.g., 🟩🟩🟩🟩🟩🟩🟩🟩⬜⬜ $17/$20)
   const stakePercent = Math.round((user.stake_remaining / user.original_stake) * 10);
-  const stakeBar = '█'.repeat(stakePercent) + '░'.repeat(10 - stakePercent);
+  const stakeBar = '🟩'.repeat(stakePercent) + '⬜'.repeat(10 - stakePercent);
 
   // Send reminder to user with day counter and stake visual
   console.log(`📤 Sending reminder to user: ${userPhone}`);
