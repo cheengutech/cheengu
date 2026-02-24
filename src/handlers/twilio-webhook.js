@@ -1,6 +1,6 @@
 const { handleSetupFlow } = require('./setup');
 const { handleJudgeResponse, handleJudgeVerification } = require('./judge');
-const { handleMenuCommand, handleMenuResponse } = require('./menu');
+const { handleMenuCommand, handleMenuResponse, handleAdminCommand, handleAdminResponse } = require('./menu');
 
 async function twilioWebhook(req, res) {
   const { From: phone, Body: message } = req.body;
@@ -8,7 +8,19 @@ async function twilioWebhook(req, res) {
   console.log(`📨 Received from ${phone}: ${message}`);
 
   try {
-    // Priority: judge consent > MENU (for judges) > HELP (for users) > judge verification > setup
+    // Priority: ADMIN > judge consent > MENU > judge verification > setup
+    
+    // ADMIN command (Brian only)
+    if (message.trim().toUpperCase() === 'ADMIN') {
+      const handled = await handleAdminCommand(phone);
+      if (handled) return res.status(200).send('<Response></Response>');
+    }
+    
+    // Check if admin response (e.g., "3 PASS")
+    const adminHandled = await handleAdminResponse(phone, message);
+    if (adminHandled) {
+      return res.status(200).send('<Response></Response>');
+    }
     
     const judgeConsentHandled = await handleJudgeResponse(phone, message);
     if (judgeConsentHandled) {

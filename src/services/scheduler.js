@@ -139,7 +139,7 @@ function startDailyCronJobs() {
         if (user.commitment_type === 'daily') {
           const userHour = getUserHour(user.timezone);
           
-          if (userHour === 20) { // 8pm in user's timezone
+          if (userHour === 21) { // 9pm in user's timezone
             await sendDailyCheckIn(
               user.id, 
               user.phone, 
@@ -180,94 +180,95 @@ function startDailyCronJobs() {
     }
   });
 
-  // 10pm UTC - send FIRST reminder to judges who haven't responded
-  cron.schedule('0 22 * * *', async () => {
-    console.log('⏰ 10pm reminder job running...');
+  // 11pm in user's timezone - send FIRST reminder to judges who haven't responded
+  cron.schedule('0 * * * *', async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      
       const { data: pendingLogs } = await supabase
         .from('daily_logs')
         .select('*, users(*)')
-        .eq('date', today)
         .eq('outcome', 'pending')
         .is('judge_verified', null);
 
       for (const log of pendingLogs || []) {
-        const displayName = log.users.user_name || log.users.phone.slice(-4);
-        await sendSMS(
-          log.users.judge_phone,
-          `Reminder: Did ${displayName} complete today's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO.`
-        );
-        console.log(`⏰ Sent 1st reminder to judge: ${log.users.judge_phone}`);
-      }
-    } catch (error) {
-      console.error('Error in 10pm reminder job:', error);
-    }
-  });
-
-  // 12am (midnight) UTC - send SECOND reminder to judges who still haven't responded
-  cron.schedule('0 0 * * *', async () => {
-    console.log('⏰ Midnight reminder job running...');
-    try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayDate = yesterday.toISOString().split('T')[0];
-      
-      const { data: pendingLogs } = await supabase
-        .from('daily_logs')
-        .select('*, users(*)')
-        .eq('date', yesterdayDate)
-        .eq('outcome', 'pending')
-        .is('judge_verified', null);
-
-      for (const log of pendingLogs || []) {
-        const displayName = log.users.user_name || log.users.phone.slice(-4);
-        await sendSMS(
-          log.users.judge_phone,
-          `Final reminder: Did ${displayName} complete yesterday's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO. Auto-PASS in 2 hours if no response.`
-        );
-        console.log(`⏰ Sent 2nd reminder to judge: ${log.users.judge_phone}`);
-      }
-    } catch (error) {
-      console.error('Error in midnight reminder job:', error);
-    }
-  });
-
-  // 2am UTC - handle no-response from judges after TWO reminders (default to PASS)
-  cron.schedule('0 2 * * *', async () => {
-    console.log('⏰ 2am auto-pass job running...');
-    try {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayDate = yesterday.toISOString().split('T')[0];
-      
-      const { data: pendingLogs } = await supabase
-        .from('daily_logs')
-        .select('*, users(*)')
-        .eq('date', yesterdayDate)
-        .eq('outcome', 'pending')
-        .is('judge_verified', null);
-
-      for (const log of pendingLogs || []) {
-        await supabase
-          .from('daily_logs')
-          .update({
-            judge_verified: true,
-            outcome: 'pass'
-          })
-          .eq('id', log.id);
-
-        if (log.users.commitment_type === 'daily') {
-          await sendSMS(log.users.phone, 'Judge did not respond after 2 reminders. Day marked as PASS.');
-        } else {
-          await sendSMS(log.users.phone, 'Judge did not respond after 2 reminders. Commitment marked as PASS.');
-        }
+        const userHour = getUserHour(log.users.timezone);
+        const today = getTodayDate(log.users.timezone);
         
-        console.log(`✅ Auto-PASS after 2 reminders (no judge response): ${log.users.phone}`);
+        // Only send at 11pm and only for today's logs
+        if (userHour === 23 && log.date === today) {
+          const displayName = log.users.user_name || log.users.phone.slice(-4);
+          await sendSMS(
+            log.users.judge_phone,
+            `Reminder: Did ${displayName} complete today's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO.`
+          );
+          console.log(`⏰ Sent 1st reminder to judge: ${log.users.judge_phone}`);
+        }
       }
     } catch (error) {
-      console.error('Error in 2am auto-pass job:', error);
+      console.error('Error in 11pm reminder job:', error);
+    }
+  });
+
+  // 7am next day in user's timezone - send SECOND reminder to judges who still haven't responded
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { data: pendingLogs } = await supabase
+        .from('daily_logs')
+        .select('*, users(*)')
+        .eq('outcome', 'pending')
+        .is('judge_verified', null);
+
+      for (const log of pendingLogs || []) {
+        const userHour = getUserHour(log.users.timezone);
+        const today = getTodayDate(log.users.timezone);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayDate = yesterday.toISOString().split('T')[0];
+        
+        // Only send at 7am for yesterday's logs
+        if (userHour === 7 && log.date === yesterdayDate) {
+          const displayName = log.users.user_name || log.users.phone.slice(-4);
+          await sendSMS(
+            log.users.judge_phone,
+            `Final reminder: Did ${displayName} complete yesterday's commitment?\n\n"${log.users.commitment_text}"\n\nReply YES or NO. Auto-FAIL at noon if no response.`
+          );
+          console.log(`⏰ Sent 2nd reminder to judge: ${log.users.judge_phone}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in 7am reminder job:', error);
+    }
+  });
+
+  // 12pm (noon) next day in user's timezone - handle no-response from judges (default to FAIL)
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { data: pendingLogs } = await supabase
+        .from('daily_logs')
+        .select('*, users(*)')
+        .eq('outcome', 'pending')
+        .is('judge_verified', null);
+
+      for (const log of pendingLogs || []) {
+        const userHour = getUserHour(log.users.timezone);
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayDate = yesterday.toISOString().split('T')[0];
+        
+        // Only auto-fail at noon for yesterday's logs
+        if (userHour === 12 && log.date === yesterdayDate) {
+          // Default to FAIL - user should have made sure their judge verified
+          await handleFailure(log.users, log);
+          
+          const userName = log.users.user_name || log.users.phone.slice(-4);
+          
+          await sendSMS(log.users.phone, `⚠️ Your judge didn't respond after 2 reminders. Day marked as FAIL.\n\nMake sure your judge is available to verify!`);
+          await sendSMS(log.users.judge_phone, `You didn't respond to verify ${userName}'s commitment. It was marked as FAIL.`);
+          
+          console.log(`❌ Auto-FAIL after 2 reminders (no judge response): ${log.users.phone}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in noon auto-fail job:', error);
     }
   });
 

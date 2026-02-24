@@ -3,6 +3,168 @@
 const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 
+// Admin phone (Brian only)
+const ADMIN_PHONE = '+15622768169';
+
+/**
+ * Handle ADMIN command - only for Brian
+ * Shows list of recent logs that can be changed
+ */
+async function handleAdminCommand(phone) {
+  if (phone !== ADMIN_PHONE) {
+    return false; // Not admin, don't handle
+  }
+  
+  console.log('🔧 Admin command received');
+  
+  // Get recent daily logs (last 7 days)
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  
+  const { data: recentLogs } = await supabase
+    .from('daily_logs')
+    .select('*, users(*)')
+    .gte('date', sevenDaysAgo.toISOString().split('T')[0])
+    .order('date', { ascending: false })
+    .limit(10);
+  
+  if (!recentLogs || recentLogs.length === 0) {
+    await sendSMS(ADMIN_PHONE, "No recent logs to edit.");
+    return true;
+  }
+  
+  // Create admin session
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 1);
+  
+  await supabase
+    .from('judge_menu_sessions')
+    .update({ active: false })
+    .eq('judge_phone', ADMIN_PHONE);
+  
+  await supabase
+    .from('judge_menu_sessions')
+    .insert({
+      judge_phone: ADMIN_PHONE,
+      pending_verifications: recentLogs.map(log => ({
+        logId: log.id,
+        date: log.date,
+        outcome: log.outcome,
+        userName: log.users?.user_name || log.users?.phone?.slice(-4) || 'Unknown',
+        commitmentText: log.users?.commitment_text || ''
+      })),
+      active: true,
+      expires_at: expiresAt.toISOString()
+    });
+  
+  let menuMessage = `🔧 ADMIN - Recent logs:\n\n`;
+  
+  recentLogs.forEach((log, index) => {
+    const name = log.users?.user_name || log.users?.phone?.slice(-4) || '???';
+    const status = log.outcome === 'pass' ? '✅' : log.outcome === 'fail' ? '❌' : '⏳';
+    menuMessage += `${index + 1}. ${log.date} - ${name} ${status}\n`;
+  });
+  
+  menuMessage += `\nReply: [#] PASS or [#] FAIL\n(e.g., "3 PASS" or "1 FAIL")`;
+  
+  await sendSMS(ADMIN_PHONE, menuMessage);
+  return true;
+}
+
+/**
+ * Handle admin's response to change a log
+ */
+async function handleAdminResponse(phone, message) {
+  if (phone !== ADMIN_PHONE) {
+    return false;
+  }
+  
+  // Check for active admin session
+  const { data: session } = await supabase
+    .from('judge_menu_sessions')
+    .select('*')
+    .eq('judge_phone', ADMIN_PHONE)
+    .eq('active', true)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single();
+  
+  if (!session) {
+    return false;
+  }
+  
+  // Parse response like "3 PASS" or "1 FAIL"
+  const match = message.trim().toUpperCase().match(/^(\d+)\s*(PASS|FAIL)$/);
+  
+  if (!match) {
+    return false; // Not an admin response format
+  }
+  
+  const index = parseInt(match[1]) - 1;
+  const newOutcome = match[2].toLowerCase();
+  const logs = session.pending_verifications;
+  
+  if (index < 0 || index >= logs.length) {
+    await sendSMS(ADMIN_PHONE, "Invalid number. Text ADMIN to see list again.");
+    return true;
+  }
+  
+  const log = logs[index];
+  
+  // Update the log
+  await supabase
+    .from('daily_logs')
+    .update({ 
+      outcome: newOutcome,
+      judge_verified: true
+    })
+    .eq('id', log.logId);
+  
+  // If changing to PASS from FAIL, restore stake
+  if (log.outcome === 'fail' && newOutcome === 'pass') {
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_name', log.userName)
+      .single();
+    
+    if (user) {
+      const penalty = user.penalty_per_failure || 5;
+      await supabase
+        .from('users')
+        .update({ stake_remaining: parseFloat(user.stake_remaining) + penalty })
+        .eq('id', user.id);
+    }
+  }
+  
+  // If changing to FAIL from PASS, deduct stake
+  if (log.outcome === 'pass' && newOutcome === 'fail') {
+    const { data: user } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_name', log.userName)
+      .single();
+    
+    if (user) {
+      const penalty = user.penalty_per_failure || 5;
+      await supabase
+        .from('users')
+        .update({ stake_remaining: Math.max(0, parseFloat(user.stake_remaining) - penalty) })
+        .eq('id', user.id);
+    }
+  }
+  
+  // Deactivate session
+  await supabase
+    .from('judge_menu_sessions')
+    .update({ active: false })
+    .eq('id', session.id);
+  
+  await sendSMS(ADMIN_PHONE, `✅ Changed ${log.date} ${log.userName} to ${newOutcome.toUpperCase()}`);
+  return true;
+}
+
 /**
  * Handle when judge texts "MENU"
  */
@@ -279,5 +441,7 @@ async function handleMenuResponse(judgePhone, message) {
 
 module.exports = {
   handleMenuCommand,
-  handleMenuResponse
+  handleMenuResponse,
+  handleAdminCommand,
+  handleAdminResponse
 };
