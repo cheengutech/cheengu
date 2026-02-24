@@ -272,6 +272,75 @@ function startDailyCronJobs() {
     }
   });
 
+  // 9am in user's timezone - Morning reminder for DAILY commitments
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { data: activeUsers } = await supabase
+        .from('users')
+        .select('*')
+        .eq('status', 'active')
+        .eq('commitment_type', 'daily');
+
+      for (const user of activeUsers || []) {
+        const userHour = getUserHour(user.timezone);
+        
+        if (userHour === 9) { // 9am in user's timezone
+          await sendSMS(
+            user.phone,
+            `🌅 Today's commitment:\n\n"${user.commitment_text}"\n\nCheck-in at 9pm.`
+          );
+          console.log(`🌅 Morning reminder sent to ${user.phone}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in morning reminder job:', error);
+    }
+  });
+
+  // 10am in user's timezone - Weekly progress check for DEADLINE commitments
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { data: deadlineUsers } = await supabase
+        .from('users')
+        .select('*')
+        .eq('status', 'active')
+        .eq('commitment_type', 'deadline');
+
+      for (const user of deadlineUsers || []) {
+        const userHour = getUserHour(user.timezone);
+        const today = new Date();
+        const deadline = new Date(user.deadline_date);
+        const daysLeft = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+        
+        // Send progress check at 10am on Mondays, or when 7 days left, or when 3 days left
+        const isMonday = today.getDay() === 1;
+        const isSevenDaysOut = daysLeft === 7;
+        const isThreeDaysOut = daysLeft === 3;
+        const isOneDayOut = daysLeft === 1;
+        
+        if (userHour === 10 && (isMonday || isSevenDaysOut || isThreeDaysOut || isOneDayOut)) {
+          const userName = user.user_name || 'there';
+          let message;
+          
+          if (isOneDayOut) {
+            message = `⚠️ Deadline is TOMORROW!\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} on the line.`;
+          } else if (isThreeDaysOut) {
+            message = `⏰ 3 days left.\n\n"${user.commitment_text}"\n\nTime to lock in.`;
+          } else if (isSevenDaysOut) {
+            message = `📅 One week left.\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} at stake.`;
+          } else {
+            message = `Weekly reminder: ${daysLeft} days left.\n\n"${user.commitment_text}"`;
+          }
+          
+          await sendSMS(user.phone, message);
+          console.log(`📅 Deadline nudge sent to ${user.phone} (${daysLeft} days left)`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in deadline progress job:', error);
+    }
+  });
+
   // 9am PST (5pm UTC) - Daily refund report to admin
   const ADMIN_PHONE = '+15622768169';
   
