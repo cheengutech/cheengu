@@ -60,6 +60,179 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
+  // Handle CHANGE command - fix past day's outcome
+  if (upperMessage === 'CHANGE') {
+    // Check if user has active commitment
+    const { data: activeUser } = await supabase
+      .from('users')
+      .select('*')
+      .eq('phone', normalizedPhone)
+      .eq('status', 'active')
+      .single();
+    
+    // Check if this person is a judge for someone
+    const { data: judging } = await supabase
+      .from('judges')
+      .select('*, users(*)')
+      .eq('phone', normalizedPhone)
+      .eq('consent_status', 'accepted');
+    
+    const activeJudging = judging?.filter(j => j.users?.status === 'active') || [];
+    
+    if (!activeUser && activeJudging.length === 0) {
+      await sendSMS(normalizedPhone, "No active commitments to change.");
+      return;
+    }
+    
+    // Get recent logs (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    let recentLogs = [];
+    
+    // Get user's own logs
+    if (activeUser) {
+      const { data: userLogs } = await supabase
+        .from('daily_logs')
+        .select('*')
+        .eq('user_id', activeUser.id)
+        .gte('date', sevenDaysAgo.toISOString().split('T')[0])
+        .order('date', { ascending: false })
+        .limit(5);
+      
+      if (userLogs) {
+        recentLogs = userLogs.map(log => ({
+          ...log,
+          userName: activeUser.user_name || 'You',
+          isOwnCommitment: true
+        }));
+      }
+    }
+    
+    // Get logs for people they're judging
+    for (const j of activeJudging) {
+      const { data: judgeLogs } = await supabase
+        .from('daily_logs')
+        .select('*')
+        .eq('user_id', j.user_id)
+        .gte('date', sevenDaysAgo.toISOString().split('T')[0])
+        .order('date', { ascending: false })
+        .limit(5);
+      
+      if (judgeLogs) {
+        recentLogs = recentLogs.concat(judgeLogs.map(log => ({
+          ...log,
+          userName: j.users.user_name || j.users.phone.slice(-4),
+          isOwnCommitment: false,
+          userId: j.user_id
+        })));
+      }
+    }
+    
+    if (recentLogs.length === 0) {
+      await sendSMS(normalizedPhone, "No recent days to change.");
+      return;
+    }
+    
+    // Sort by date descending and limit
+    recentLogs.sort((a, b) => new Date(b.date) - new Date(a.date));
+    recentLogs = recentLogs.slice(0, 7);
+    
+    // Store in setup_state for next response
+    await supabase
+      .from('setup_state')
+      .upsert({
+        phone: normalizedPhone,
+        current_step: 'awaiting_change_selection',
+        temp_commitment: JSON.stringify(recentLogs)
+      });
+    
+    let menuMsg = `📝 Recent days (last 7):\n\n`;
+    recentLogs.forEach((log, i) => {
+      const status = log.outcome === 'pass' ? '✅' : log.outcome === 'fail' ? '❌' : '⏳';
+      const name = log.isOwnCommitment ? '' : `(${log.userName}) `;
+      menuMsg += `${i + 1}. ${log.date} ${name}${status}\n`;
+    });
+    menuMsg += `\nReply: [#] PASS or [#] FAIL\n(e.g., "2 FAIL")`;
+    
+    await sendSMS(normalizedPhone, menuMsg);
+    return;
+  }
+
+  // Handle CHANGE selection response
+  if (setupState && setupState.current_step === 'awaiting_change_selection') {
+    const match = message.trim().toUpperCase().match(/^(\d+)\s*(PASS|FAIL)$/);
+    
+    if (!match) {
+      await sendSMS(normalizedPhone, "Reply with number and PASS or FAIL.\n(e.g., '2 FAIL')");
+      return;
+    }
+    
+    const index = parseInt(match[1]) - 1;
+    const newOutcome = match[2].toLowerCase();
+    
+    let logs;
+    try {
+      logs = JSON.parse(setupState.temp_commitment);
+    } catch (e) {
+      await sendSMS(normalizedPhone, "Something went wrong. Text CHANGE to try again.");
+      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+      return;
+    }
+    
+    if (index < 0 || index >= logs.length) {
+      await sendSMS(normalizedPhone, "Invalid number. Text CHANGE to see list again.");
+      return;
+    }
+    
+    const log = logs[index];
+    const oldOutcome = log.outcome;
+    
+    // Update the log
+    await supabase
+      .from('daily_logs')
+      .update({ outcome: newOutcome, judge_verified: true })
+      .eq('id', log.id);
+    
+    // Adjust stake if outcome changed
+    if (oldOutcome !== newOutcome) {
+      // Get user to adjust stake
+      const userId = log.user_id || log.userId;
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', userId)
+        .single();
+      
+      if (user) {
+        const penalty = user.penalty_per_failure || 5;
+        let newStake = parseFloat(user.stake_remaining);
+        
+        if (oldOutcome === 'pass' && newOutcome === 'fail') {
+          newStake = Math.max(0, newStake - penalty);
+        } else if (oldOutcome === 'fail' && newOutcome === 'pass') {
+          newStake = Math.min(user.original_stake, newStake + penalty);
+        }
+        
+        await supabase
+          .from('users')
+          .update({ stake_remaining: newStake })
+          .eq('id', userId);
+        
+        // Notify the user if judge changed it
+        if (!log.isOwnCommitment) {
+          await sendSMS(user.phone, `Your judge changed ${log.date} to ${newOutcome.toUpperCase()}. Stake: $${newStake}/$${user.original_stake}`);
+        }
+      }
+    }
+    
+    // Clear setup state
+    await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+    
+    await sendSMS(normalizedPhone, `✅ Changed ${log.date} to ${newOutcome.toUpperCase()}.`);
+    return;
+  }
+
   // Handle STATUS command - check current commitment (works anytime)
   if (upperMessage === 'STATUS') {
     const { data: activeUser } = await supabase
@@ -125,8 +298,8 @@ async function handleSetupFlow(phone, message) {
       `STATUS - Check your current commitment\n` +
       `HISTORY - See past commitments\n` +
       `MENU - Judge someone early\n` +
-      `RESET - Cancel setup and start over\n` +
-      `UNDO - Judge: fix a mistake (5 min window)\n\n` +
+      `CHANGE - Fix a past day's pass/fail\n` +
+      `RESET - Cancel setup and start over\n\n` +
       `📊 Dashboard: cheengu.com/dashboard\n\n` +
       `Questions? Just reply here.`
     );
