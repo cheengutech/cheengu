@@ -112,7 +112,7 @@ async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText
   // Send reminder to user
   await sendSMS(
     userPhone,
-    `⏰ Deadline day!\n\n"${commitmentText}"\n\nYour judge is being asked to verify now.\n\nText STATUS to check progress or HOW for help.`
+    `⏰ Deadline day!\n\n"${commitmentText}"\n\nYour judge is being asked to verify now.\n\nText STATUS to check progress or HELP for help.`
   );
 
   // Ask judge about final outcome

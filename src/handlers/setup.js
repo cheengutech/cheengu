@@ -25,7 +25,7 @@ async function handleSetupFlow(phone, message) {
       .eq('status', 'active');
     
     if (activeUsers && activeUsers.length > 0) {
-      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HELP for help.");
       return;
     }
     
@@ -59,6 +59,15 @@ async function handleSetupFlow(phone, message) {
     );
     return;
   }
+
+  // Get current setup state (used by multiple flows below)
+  let { data: setupState, error: setupError } = await supabase
+    .from('setup_state')
+    .select('*')
+    .eq('phone', normalizedPhone)
+    .single();
+
+  console.log('🔍 Setup state check:', setupState, setupError);
 
   // Handle CHANGE command - fix past day's outcome
   if (upperMessage === 'CHANGE') {
@@ -324,19 +333,10 @@ async function handleSetupFlow(phone, message) {
     console.log('⚠️ User already has active commitment');
     await sendSMS(
       normalizedPhone,
-      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress, or HOW for help.'
+      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress, or HELP for help.'
     );
     return;
   }
-
-  // Get or create setup state
-  let { data: setupState, error: setupError } = await supabase
-    .from('setup_state')
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .single();
-
-  console.log('🔍 Setup state check:', setupState, setupError);
 
   // Handle RESET command - clear setup state and start fresh
   if (upperMessage === 'RESET') {
@@ -348,7 +348,7 @@ async function handleSetupFlow(phone, message) {
       .eq('status', 'active');
     
     if (activeUsers && activeUsers.length > 0) {
-      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HELP for help.");
       return;
     }
     
@@ -389,7 +389,7 @@ async function handleSetupFlow(phone, message) {
   // No setup state and not a command - prompt to start
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
-    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HOW for help.');
+    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HELP for help.');
     return;
   }
 
@@ -897,4 +897,4 @@ function parseDeadlineDate(input) {
   return null;
 }
 
-module.exports = { handleSetupFlow };
+module.exports = { handleSetupFlow };   

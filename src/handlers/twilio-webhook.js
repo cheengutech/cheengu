@@ -39,9 +39,20 @@ async function twilioWebhook(req, res) {
       return res.status(200).send('<Response></Response>');
     }
 
-    // HOW, STATUS, HISTORY, RESET commands - route to setup flow
-    const upperMessage = message.trim().toUpperCase();
-    if (upperMessage === 'HOW' || upperMessage === 'STATUS' || upperMessage === 'HISTORY' || upperMessage === 'RESET') {
+    // HELP/HOW, STATUS, HISTORY, RESET commands - route to setup flow
+    const trimmed = message.trim();
+    const upperMessage = trimmed.toUpperCase();
+    const lowerMessage = trimmed.toLowerCase();
+
+    if (
+      upperMessage === 'HELP' ||
+      upperMessage === 'HOW' || // legacy alias
+      upperMessage === 'STATUS' ||
+      upperMessage === 'HISTORY' ||
+      upperMessage === 'RESET' ||
+      lowerMessage === 'commands' ||
+      lowerMessage === '?'
+    ) {
       await handleSetupFlow(phone, message);
       return res.status(200).send('<Response></Response>');
     }

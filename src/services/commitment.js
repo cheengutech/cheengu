@@ -42,7 +42,7 @@ async function handleFailure(user, log) {
 
   await sendSMS(
     user.phone,
-    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HOW for help.`
+    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HELP for help.`
   );
   
   // Notify judge
