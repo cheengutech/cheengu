@@ -3,7 +3,6 @@
 const { supabase } = require('../config/database');
 const { sendSMS } = require('../services/sms');
 const { normalizePhone } = require('../utils/phone');
-const { stripe } = require('../config/stripe');
 const { interpretInput, needsInterpretation } = require('../services/interpreter');
 
 async function handleSetupFlow(phone, message) {
@@ -25,7 +24,7 @@ async function handleSetupFlow(phone, message) {
       .eq('status', 'active');
     
     if (activeUsers && activeUsers.length > 0) {
-      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HELP for help.");
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
       return;
     }
     
@@ -59,15 +58,6 @@ async function handleSetupFlow(phone, message) {
     );
     return;
   }
-
-  // Get current setup state (used by multiple flows below)
-  let { data: setupState, error: setupError } = await supabase
-    .from('setup_state')
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .single();
-
-  console.log('🔍 Setup state check:', setupState, setupError);
 
   // Handle CHANGE command - fix past day's outcome
   if (upperMessage === 'CHANGE') {
@@ -333,10 +323,19 @@ async function handleSetupFlow(phone, message) {
     console.log('⚠️ User already has active commitment');
     await sendSMS(
       normalizedPhone,
-      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress, or HELP for help.'
+      'You already have an active commitment. Complete it first before starting a new one.\n\nText STATUS to check your progress, or HOW for help.'
     );
     return;
   }
+
+  // Get or create setup state
+  let { data: setupState, error: setupError } = await supabase
+    .from('setup_state')
+    .select('*')
+    .eq('phone', normalizedPhone)
+    .single();
+
+  console.log('🔍 Setup state check:', setupState, setupError);
 
   // Handle RESET command - clear setup state and start fresh
   if (upperMessage === 'RESET') {
@@ -348,7 +347,7 @@ async function handleSetupFlow(phone, message) {
       .eq('status', 'active');
     
     if (activeUsers && activeUsers.length > 0) {
-      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HELP for help.");
+      await sendSMS(normalizedPhone, "You have an active commitment - no backing out now! 💪\n\nText STATUS to check your progress, or HOW for help.");
       return;
     }
     
@@ -389,7 +388,7 @@ async function handleSetupFlow(phone, message) {
   // No setup state and not a command - prompt to start
   if (!setupState) {
     console.log('💬 No setup state, sending START prompt');
-    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HELP for help.');
+    await sendSMS(normalizedPhone, 'Text START to begin a new commitment, or HOW for help.');
     return;
   }
 
@@ -675,78 +674,87 @@ async function handleSetupFlow(phone, message) {
     }
 
     console.log('👨‍⚖️ Judge name:', judgeName, 'Phone:', judgePhone);
-    console.log('💳 Creating Stripe payment intent');
     
     const stakeAmount = setupState.temp_stake_amount || 20;
     const penaltyAmount = setupState.temp_penalty_amount || 5;
     const userName = setupState.temp_user_name || 'Someone';
+    const commitmentType = setupState.temp_commitment_type;
+    const commitmentText = setupState.temp_commitment;
     
-    try {
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: stakeAmount * 100,
-        currency: 'usd',
-        metadata: {
-          phone: normalizedPhone,
-          user_name: userName,
-          commitment: setupState.temp_commitment,
-          commitment_type: setupState.temp_commitment_type,
-          deadline_date: setupState.temp_deadline_date || '',
-          judge_phone: judgePhone,
-          judge_name: judgeName,
-          stake_amount: stakeAmount.toString(),
-          penalty_amount: penaltyAmount.toString()
-        }
-      });
-
-      console.log('✅ Payment intent created:', paymentIntent.id);
-
-      await supabase
-        .from('setup_state')
-        .update({
-          temp_judge_phone: judgePhone,
-          temp_judge_name: judgeName,
-          current_step: 'awaiting_payment'
-        })
-        .eq('phone', normalizedPhone);
-
-      console.log('✅ Updated to awaiting_payment');
-
-      const paymentLink = `${process.env.APP_URL}/pay/${paymentIntent.id}`;
-      console.log('🔗 Payment link:', paymentLink);
-      
-      await sendSMS(
-        normalizedPhone,
-        `Almost there! Stake your $${stakeAmount} to lock it in:\n\n${paymentLink}\n\nOnce paid, we'll reach out to ${judgeName}.`
-      );
-    } catch (stripeError) {
-      console.error('❌ Stripe error:', stripeError);
-      await sendSMS(normalizedPhone, 'Sorry, something went wrong setting up payment. Please try again.');
+    // Calculate dates
+    let commitmentStartDate = new Date();
+    let commitmentEndDate;
+    let duration;
+    
+    if (commitmentType === 'daily') {
+      duration = parseInt(setupState.temp_deadline_date) || 7;
+      commitmentEndDate = new Date();
+      commitmentEndDate.setDate(commitmentEndDate.getDate() + duration);
+    } else {
+      // deadline type
+      commitmentEndDate = new Date(setupState.temp_deadline_date);
+      duration = Math.ceil((commitmentEndDate - commitmentStartDate) / (1000 * 60 * 60 * 24));
     }
-    return;
-  }
-  
-  // Handle awaiting_payment state - user hasn't paid yet
-  if (setupState.current_step === 'awaiting_payment') {
-    // Check if they want to restart
-    if (upperMessage === 'START') {
-      await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
-      await sendSMS(normalizedPhone, 'Previous setup cleared. Let\'s start fresh!\n\nWhat\'s your name?\n\n(e.g., Brian)');
-      
-      await supabase
-        .from('setup_state')
-        .insert({
-          phone: normalizedPhone,
-          current_step: 'awaiting_name'
-        });
+    
+    // Create user record (awaiting judge approval)
+    const { data: newUser, error: userError } = await supabase
+      .from('users')
+      .insert({
+        phone: normalizedPhone,
+        user_name: userName,
+        commitment_text: commitmentText,
+        commitment_type: commitmentType,
+        commitment_start_date: commitmentStartDate.toISOString().split('T')[0],
+        commitment_end_date: commitmentEndDate.toISOString().split('T')[0],
+        commitment_duration: duration,
+        deadline_date: commitmentType === 'deadline' ? setupState.temp_deadline_date : null,
+        judge_phone: judgePhone,
+        judge_name: judgeName,
+        original_stake: stakeAmount,
+        stake_remaining: stakeAmount,
+        penalty_per_failure: penaltyAmount,
+        status: 'awaiting_judge',
+        timezone: 'America/Los_Angeles'
+      })
+      .select()
+      .single();
+    
+    if (userError) {
+      console.error('❌ Error creating user:', userError);
+      await sendSMS(normalizedPhone, 'Something went wrong. Text START to try again.');
       return;
     }
     
-    // Otherwise, remind them to pay
-    const stakeAmount = setupState.temp_stake_amount || 20;
+    // Create judge record
+    await supabase
+      .from('judges')
+      .insert({
+        phone: judgePhone,
+        user_id: newUser.id,
+        consent_status: 'pending'
+      });
+    
+    // Clear setup state
+    await supabase.from('setup_state').delete().eq('phone', normalizedPhone);
+    
+    // Notify user
     await sendSMS(
       normalizedPhone,
-      `You have a pending commitment waiting for payment ($${stakeAmount}).\n\nReply START to cancel and begin fresh, or complete your payment to activate.`
+      `Perfect! Reaching out to ${judgeName} now.\n\nYou'll be notified when they accept.`
     );
+    
+    // Contact judge
+    await sendSMS(
+      judgePhone,
+      `${userName} wants you to be their accountability partner.\n\n` +
+      `Goal: "${commitmentText}"\n` +
+      `Stake: $${stakeAmount} (${commitmentType === 'daily' ? `$${penaltyAmount}/day` : 'all or nothing'})\n` +
+      `Duration: ${duration} days\n\n` +
+      `If ${userName} fails, they owe you $${stakeAmount}.\n\n` +
+      `Reply ACCEPT or DECLINE.`
+    );
+    
+    console.log('✅ Commitment created, judge contacted');
     return;
   }
   
@@ -897,4 +905,4 @@ function parseDeadlineDate(input) {
   return null;
 }
 
-module.exports = { handleSetupFlow };   
+module.exports = { handleSetupFlow };

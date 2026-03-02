@@ -4,7 +4,6 @@
 
 const { supabase } = require('../config/database');
 const { sendSMS } = require('./sms');
-const { stripe } = require('../config/stripe');
 
 async function handleFailure(user, log) {
   // Use the user's custom penalty amount, or default to $5
@@ -26,7 +25,7 @@ async function handleFailure(user, log) {
     .update({ stake_remaining: Math.max(0, newStake) })
     .eq('id', user.id);
 
-  // Track the penalty (for your records, not paying out to judge for now)
+  // Track the penalty
   await supabase.from('payouts').insert({
     judge_phone: user.judge_phone,
     amount: penaltyAmount,
@@ -42,7 +41,7 @@ async function handleFailure(user, log) {
 
   await sendSMS(
     user.phone,
-    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HELP for help.`
+    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HOW for help.`
   );
   
   // Notify judge
@@ -69,76 +68,71 @@ async function endCommitment(userId, reason) {
     return;
   }
 
-  // Calculate refund amount
-  const refundAmount = Math.max(0, parseFloat(user.stake_remaining));
-  const originalStake = user.original_stake || 20;
-  const totalPenalties = originalStake - refundAmount;
+  // Get all daily logs for this commitment
+  const { data: logs } = await supabase
+    .from('daily_logs')
+    .select('*')
+    .eq('user_id', userId)
+    .order('date', { ascending: true });
 
-  // Issue Stripe refund if there's money to refund and we have a payment intent
-  if (refundAmount > 0 && user.payment_intent_id) {
-    try {
-      const refund = await stripe.refunds.create({
-        payment_intent: user.payment_intent_id,
-        amount: Math.round(refundAmount * 100), // Convert to cents
-      });
-      console.log(`💰 Refund issued: $${refundAmount} for user ${userId}`, refund.id);
-    } catch (error) {
-      console.error('❌ Stripe refund failed:', error);
-      // Still mark as completed, but flag for manual review
-      await supabase
-        .from('users')
-        .update({ 
-          status: 'completed',
-          refund_status: 'failed',
-          refund_error: error.message
-        })
-        .eq('id', userId);
-      
-      await sendSMS(
-        user.phone,
-        `Your commitment is complete! Refund of $${refundAmount} failed to process automatically. We'll sort this out manually - hang tight!`
-      );
-      return;
-    }
-  }
+  // Calculate stats
+  const totalDays = logs?.length || 0;
+  const passedDays = logs?.filter(l => l.outcome === 'pass').length || 0;
+  const failedDays = logs?.filter(l => l.outcome === 'fail').length || 0;
+  
+  const originalStake = user.original_stake || 20;
+  const stakeRemaining = Math.max(0, parseFloat(user.stake_remaining));
+  const totalLost = originalStake - stakeRemaining;
+  const penaltyPerDay = user.penalty_per_failure || 5;
+  
+  const userName = user.user_name || 'User';
+  const judgeName = user.judge_name || 'Judge';
+  
+  // Format dates
+  const startDate = new Date(user.commitment_start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const endDate = new Date(user.commitment_end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
   // Update user status
   await supabase
     .from('users')
-    .update({ 
-      status: 'completed',
-      refund_status: refundAmount > 0 ? 'refunded' : 'no_refund',
-      refund_amount: refundAmount
-    })
+    .update({ status: 'completed' })
     .eq('id', userId);
 
-  // Send completion message based on reason and outcome
-  let message;
-  const userName = user.user_name || 'You';
+  // Build report card - compact format
+  let userReport = `📊 COMMITMENT COMPLETE\n`;
+  userReport += `Goal: ${user.commitment_text}\n`;
+  userReport += `Duration: ${startDate} – ${endDate}\n\n`;
+  userReport += `Final Result: ${passedDays}/${totalDays} days\n`;
+  userReport += `Missed: ${failedDays} day${failedDays !== 1 ? 's' : ''}\n\n`;
+  userReport += `Stake: $${penaltyPerDay}/day\n`;
+  userReport += `Total Owed: $${totalLost}\n`;
+  userReport += `Owed To: ${totalLost > 0 ? judgeName : 'Nobody — Perfect! 🎉'}`;
   
-  if (reason === 'stake_depleted') {
-    message = `😔 Your stake has been fully depleted.\n\nCommitment ended. Don't give up - text START to try again! 💪\n\nView history: cheengu.com/dashboard`;
-  } else if (refundAmount === originalStake) {
-    // Perfect completion - full refund, celebrate!
-    message = `🎉 PERFECT! You crushed it!\n\nFull $${refundAmount} refunded to your card (5-10 business days).\n\nView your stats: cheengu.com/dashboard\n\nReady for another challenge? Text START!`;
-  } else if (refundAmount > 0) {
-    // Partial completion - show what they kept
-    const percentKept = Math.round((refundAmount / originalStake) * 100);
-    const daysLost = Math.round(totalPenalties / (user.penalty_per_failure || 5));
-    message = `✅ Commitment complete!\n\nYou kept ${percentKept}% of your stake.\n$${refundAmount}/$${originalStake} refunded (5-10 business days).\n\n${daysLost} missed day${daysLost > 1 ? 's' : ''} cost you $${totalPenalties}.\n\nView history: cheengu.com/dashboard\n\nText START to go again!`;
-  } else {
-    // No refund
-    message = `😔 Commitment complete.\n\nYour full stake was lost through missed days.\n\nView history: cheengu.com/dashboard\n\nDon't give up - text START to try again! 💪`;
+  if (totalLost > 0) {
+    userReport += `\n\nSettle up via Venmo, cash, etc.`;
   }
+  userReport += `\n\nText START for a new commitment.`;
 
-  await sendSMS(user.phone, message);
+  // Judge report
+  let judgeReport = `📊 COMMITMENT COMPLETE\n`;
+  judgeReport += `Goal: ${user.commitment_text}\n`;
+  judgeReport += `Duration: ${startDate} – ${endDate}\n\n`;
+  judgeReport += `Final Result: ${passedDays}/${totalDays} days\n`;
+  judgeReport += `Missed: ${failedDays} day${failedDays !== 1 ? 's' : ''}\n\n`;
+  judgeReport += `Stake: $${penaltyPerDay}/day\n`;
+  judgeReport += `Total Owed: $${totalLost}\n`;
+  judgeReport += `Owed To: ${totalLost > 0 ? 'You' : 'Nobody — Perfect! 🎉'}`;
   
-  // Notify judge that commitment ended
-  const judgeName = user.judge_name || 'Judge';
-  await sendSMS(
-    user.judge_phone,
-    `${userName}'s commitment has ended. Thanks for being their accountability partner! 🙏`
-  );
+  if (totalLost > 0) {
+    judgeReport += `\n\nSettle up via Venmo, cash, etc.`;
+  }
+  judgeReport += `\n\nThanks for judging.`;
+
+  // Send report cards
+  await sendSMS(user.phone, userReport);
+  await sendSMS(user.judge_phone, judgeReport);
+  
+  console.log(`📊 Report cards sent for ${userName}'s commitment`);
 }
 
 module.exports = { handleFailure, endCommitment };
