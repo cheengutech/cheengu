@@ -64,6 +64,7 @@ async function clearSetupState(phone) {
 }
 
 async function handleSetupFlow(phone, message) {
+  console.log('🔍 Setup flow called with phone:', phone);  // ADD THIS
   const state = await getSetupState(phone);
   const upperMessage = message.trim().toUpperCase();
 
