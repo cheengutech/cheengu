@@ -14,6 +14,15 @@ async function handleSetupFlow(phone, message) {
   const upperMessage = message.trim().toUpperCase();
   const lowerMessage = message.trim().toLowerCase();
 
+  // Fetch setup state early so it's available throughout the function
+  let { data: setupState, error: setupError } = await supabase
+    .from('setup_state')
+    .select('*')
+    .eq('phone', normalizedPhone)
+    .single();
+  
+  console.log('🔍 Setup state:', setupState ? setupState.current_step : 'none');
+
   // Keyword matching for common command variations
   if (lowerMessage.includes('cancel') || lowerMessage.includes('stop') || lowerMessage === 'quit') {
     // Treat as RESET
@@ -328,14 +337,7 @@ async function handleSetupFlow(phone, message) {
     return;
   }
 
-  // Get or create setup state
-  let { data: setupState, error: setupError } = await supabase
-    .from('setup_state')
-    .select('*')
-    .eq('phone', normalizedPhone)
-    .single();
-
-  console.log('🔍 Setup state check:', setupState, setupError);
+  // setupState already fetched at top of function
 
   // Handle RESET command - clear setup state and start fresh
   if (upperMessage === 'RESET') {
