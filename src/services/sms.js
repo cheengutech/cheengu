@@ -1,4 +1,7 @@
-// src/services/sms.js
+// ============================================================================
+// FILE: src/services/sms.js
+// CHEENGU V2: SMS service with AI-powered GIFs
+// ============================================================================
 
 const twilio = require('twilio');
 const Anthropic = require('@anthropic-ai/sdk');
@@ -14,12 +17,9 @@ const anthropic = new Anthropic({
 
 /**
  * Search Klipy for a GIF based on a search query
- * @param {string} query - Search term
- * @returns {string|null} - GIF URL or null
  */
 async function searchGif(query) {
   try {
-    // Klipy API (drop-in replacement for Tenor, run by ex-Tenor team)
     const response = await fetch(
       `https://api.klipy.com/v1/search?q=${encodeURIComponent(query)}&key=${process.env.KLIPY_API_KEY}&limit=1&media_filter=gif`
     );
@@ -32,7 +32,6 @@ async function searchGif(query) {
     const data = await response.json();
     
     if (data.results && data.results.length > 0) {
-      // Get the GIF URL (use smaller format for MMS)
       const gif = data.results[0].media_formats?.tinygif?.url || 
                   data.results[0].media_formats?.gif?.url ||
                   data.results[0].url;
@@ -47,10 +46,7 @@ async function searchGif(query) {
 }
 
 /**
- * Use AI to generate a GIF search query based on message content
- * @param {string} messageText - The SMS message being sent
- * @param {string} context - Additional context (e.g., 'success', 'failure', 'reminder')
- * @returns {string} - Search query for GIF
+ * Use AI to generate a GIF search query
  */
 async function getGifSearchQuery(messageText, context = '') {
   try {
@@ -60,49 +56,38 @@ async function getGifSearchQuery(messageText, context = '') {
       messages: [
         {
           role: 'user',
-          content: `You are a GIF search assistant for an accountability app with a drill sergeant personality. 
-
-Given this message being sent to a user, generate a SHORT (2-4 words) search query to find a relevant, motivational GIF.
+          content: `Generate a 2-4 word GIF search query for this message in an accountability competition app.
 
 Message: "${messageText}"
-Context: ${context || 'general accountability message'}
+Context: ${context || 'competition/game'}
 
 Rules:
-- Keep it simple and searchable (e.g., "drill sergeant yelling", "celebration dance", "disappointed coach")
-- Match the tone: tough love, military, sports coaching, motivation
-- For success: victory, celebration, salute, proud
-- For failure: disappointed, facepalm, do better, try again
-- For reminders: wake up, get moving, clock ticking
-- Avoid anything offensive or inappropriate
+- Keep it simple (e.g., "victory celebration", "game over", "you win")
+- Match the tone: competitive, sports, gaming
+- For wins: trophy, victory, champion, celebration
+- For losses: game over, defeated, loser, pay up
 
-Reply with ONLY the search query, nothing else.`
+Reply with ONLY the search query.`
         }
       ]
     });
 
     const query = response.content[0].text.trim();
-    console.log(`🤖 AI GIF query for "${messageText.substring(0, 30)}...": "${query}"`);
+    console.log(`🤖 AI GIF query: "${query}"`);
     return query;
   } catch (error) {
     console.error('❌ AI GIF query failed:', error.message);
-    // Fallback queries based on context
     const fallbacks = {
-      success: 'thumbs up celebration',
-      failure: 'disappointed coach',
-      reminder: 'drill sergeant',
-      welcome: 'military salute',
-      complete: 'victory dance',
-      reengagement: 'waiting impatiently'
+      success: 'victory celebration',
+      failure: 'game over loser',
+      complete: 'champion trophy',
     };
-    return fallbacks[context] || 'motivation drill sergeant';
+    return fallbacks[context] || 'competition';
   }
 }
 
 /**
- * Send an SMS message (no GIF)
- * @param {string} to - Recipient phone number
- * @param {string} body - Message text
- * @param {string|string[]} [mediaUrl] - Optional URL(s) to GIF/image for MMS
+ * Send an SMS message
  */
 async function sendSMS(to, body, mediaUrl = null) {
   try {
@@ -117,7 +102,7 @@ async function sendSMS(to, body, mediaUrl = null) {
     }
 
     const message = await twilioClient.messages.create(messageOptions);
-    console.log(`📤 SMS sent to ${to}: ${body.substring(0, 50)}...${mediaUrl ? ' [+GIF]' : ''}`);
+    console.log(`📤 SMS to ${to}: ${body.substring(0, 50)}...${mediaUrl ? ' [+GIF]' : ''}`);
     return message;
   } catch (error) {
     console.error(`❌ SMS failed to ${to}:`, error.message);
@@ -126,47 +111,28 @@ async function sendSMS(to, body, mediaUrl = null) {
 }
 
 /**
- * Send an SMS with an AI-selected GIF based on message content
- * @param {string} to - Recipient phone number
- * @param {string} body - Message text
- * @param {string} [context] - Context hint ('success', 'failure', 'reminder', 'welcome', 'complete', 'reengagement')
+ * Send SMS with AI-selected GIF
  */
 async function sendSMSWithAIGif(to, body, context = '') {
   try {
-    // Get AI-generated search query
     const searchQuery = await getGifSearchQuery(body, context);
-    
-    // Search for GIF
     const gifUrl = await searchGif(searchQuery);
     
     if (gifUrl) {
       return sendSMS(to, body, gifUrl);
     } else {
-      // Fall back to text-only if no GIF found
       console.log(`⚠️ No GIF found for "${searchQuery}", sending text only`);
       return sendSMS(to, body);
     }
   } catch (error) {
     console.error('❌ sendSMSWithAIGif failed:', error.message);
-    // Fall back to text-only
     return sendSMS(to, body);
   }
 }
 
-/**
- * Send SMS with a specific GIF URL (no AI)
- * @param {string} to - Recipient phone number
- * @param {string} body - Message text
- * @param {string} gifUrl - Direct URL to GIF
- */
-async function sendSMSWithGif(to, body, gifUrl) {
-  return sendSMS(to, body, gifUrl);
-}
-
 module.exports = { 
   sendSMS, 
-  sendSMSWithAIGif, 
-  sendSMSWithGif,
+  sendSMSWithAIGif,
   searchGif,
   getGifSearchQuery
 };
