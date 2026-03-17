@@ -1,74 +1,74 @@
+// ============================================================================
+// FILE: src/handlers/twilio-webhook.js
+// CHEENGU V2: Main SMS router
+// ============================================================================
+
 const { handleSetupFlow } = require('./setup');
-const { handleJudgeResponse, handleJudgeVerification } = require('./judge');
-const { handleMenuCommand, handleMenuResponse, handleAdminCommand, handleAdminResponse } = require('./menu');
+const { handleInviteResponse } = require('./invite');
+const { handleCheckInResponse, handleStatusRequest } = require('./checkin');
+const { sendSMS } = require('../services/sms');
 
-async function twilioWebhook(req, res) {
-  const { From: phone, Body: message } = req.body;
+async function handleIncomingSMS(phone, message) {
+  console.log(`📥 Incoming: ${phone} -> "${message}"`);
   
-  console.log(`📨 Received from ${phone}: ${message}`);
+  const trimmed = message.trim();
+  const upper = trimmed.toUpperCase();
 
-  try {
-    // Priority: ADMIN > judge consent > MENU > judge verification > setup
-    
-    // ADMIN command (Brian only)
-    if (message.trim().toUpperCase() === 'ADMIN') {
-      const handled = await handleAdminCommand(phone);
-      if (handled) return res.status(200).send('<Response></Response>');
-    }
-    
-    // Check if admin response (e.g., "3 PASS")
-    const adminHandled = await handleAdminResponse(phone, message);
-    if (adminHandled) {
-      return res.status(200).send('<Response></Response>');
-    }
-    
-    const judgeConsentHandled = await handleJudgeResponse(phone, message);
-    if (judgeConsentHandled) {
-      return res.status(200).send('<Response></Response>');
-    }
-
-    // MENU command for judges
-    if (message.trim().toUpperCase() === 'MENU') {
-      await handleMenuCommand(phone);
-      return res.status(200).send('<Response></Response>');
-    }
-
-    // Check if judge is in active menu session
-    const menuResponseHandled = await handleMenuResponse(phone, message);
-    if (menuResponseHandled) {
-      return res.status(200).send('<Response></Response>');
-    }
-
-    // HELP/HOW, STATUS, HISTORY, RESET commands - route to setup flow
-    const trimmed = message.trim();
-    const upperMessage = trimmed.toUpperCase();
-    const lowerMessage = trimmed.toLowerCase();
-
-    if (
-      upperMessage === 'HELP' ||
-      upperMessage === 'HOW' || // legacy alias
-      upperMessage === 'STATUS' ||
-      upperMessage === 'HISTORY' ||
-      upperMessage === 'RESET' ||
-      lowerMessage === 'commands' ||
-      lowerMessage === '?'
-    ) {
-      await handleSetupFlow(phone, message);
-      return res.status(200).send('<Response></Response>');
-    }
-
-    const judgeVerificationHandled = await handleJudgeVerification(phone, message);
-    if (judgeVerificationHandled) {
-      return res.status(200).send('<Response></Response>');
-    }
-
-    await handleSetupFlow(phone, message);
-    
-    res.status(200).send('<Response></Response>');
-  } catch (error) {
-    console.error('Error handling SMS:', error);
-    res.status(500).send('<Response></Response>');
+  // ============================================
+  // PRIORITY 1: Universal commands
+  // ============================================
+  
+  if (upper === 'HELP' || upper === 'HOW') {
+    await sendSMS(phone, 
+      `CHEENGU\n\n` +
+      `START - Create a challenge\n` +
+      `MATCH - Join a challenge\n` +
+      `STATUS - Check standings\n` +
+      `YES/NO - Daily check-in`
+    );
+    return;
   }
+
+  if (upper === 'STATUS') {
+    const handled = await handleStatusRequest(phone);
+    if (handled) return;
+  }
+
+  // MATCH is a shortcut to START with matching
+  if (upper === 'MATCH') {
+    // Treat as START, will offer MATCH option
+    await handleSetupFlow(phone, 'START');
+    return;
+  }
+
+  // ============================================
+  // PRIORITY 2: Setup flow (START, or in-progress)
+  // ============================================
+  
+  const setupHandled = await handleSetupFlow(phone, message);
+  if (setupHandled) return;
+
+  // ============================================
+  // PRIORITY 3: Invite responses (YES/NO for pending invites)
+  // ============================================
+  
+  const inviteHandled = await handleInviteResponse(phone, message);
+  if (inviteHandled) return;
+
+  // ============================================
+  // PRIORITY 4: Check-in responses (YES/NO for daily check-ins)
+  // ============================================
+  
+  const checkInHandled = await handleCheckInResponse(phone, message);
+  if (checkInHandled) return;
+
+  // ============================================
+  // FALLBACK: Unknown message
+  // ============================================
+  
+  await sendSMS(phone, 
+    `Text START to create a challenge\nText STATUS to check standings`
+  );
 }
 
-module.exports = twilioWebhook;
+module.exports = { handleIncomingSMS };

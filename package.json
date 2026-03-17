@@ -1,33 +1,24 @@
 {
-    "name": "cheengu",
-    "version": "1.0.0",
-    "description": "SMS-based accountability system with human verification",
-    "main": "server.js",
+    "name": "cheengu-v2",
+    "version": "2.0.0",
+    "description": "Group accountability game via SMS",
+    "main": "src/server.js",
     "scripts": {
-        "start": "node server.js",
-        "dev": "nodemon server.js",
-        "setup-db": "psql $DATABASE_URL -f database/schema.sql"
+      "start": "node src/server.js",
+      "dev": "nodemon src/server.js"
     },
-    "keywords": [
-        "sms",
-        "accountability",
-        "fitness",
-        "commitment"
-    ],
-    "author": "Your Name",
-    "license": "MIT",
     "dependencies": {
-        "@anthropic-ai/sdk": "^0.76.0",
-        "@supabase/supabase-js": "^2.39.0",
-        "cors": "^2.8.6",
-        "dotenv": "^16.3.1",
-        "express": "^4.18.2",
-        "moment-timezone": "^0.5.43",
-        "node-cron": "^3.0.3",
-        "stripe": "^14.10.0",
-        "twilio": "^4.19.0"
+      "@anthropic-ai/sdk": "^0.24.0",
+      "@supabase/supabase-js": "^2.39.0",
+      "dotenv": "^16.3.1",
+      "express": "^4.18.2",
+      "node-cron": "^3.0.3",
+      "twilio": "^4.19.0"
     },
     "devDependencies": {
-        "nodemon": "^3.0.2"
+      "nodemon": "^3.0.2"
+    },
+    "engines": {
+      "node": ">=18.0.0"
     }
-}
+  }
