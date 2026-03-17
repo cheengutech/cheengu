@@ -4,7 +4,33 @@
 // ============================================================================
 
 const { supabase } = require('../config/database');
-const { sendSMS } = require('../services/sms');
+const { sendSMS, sendSMSWithAIGif } = require('../services/sms');
+
+/**
+ * Determine if this day should get a GIF (first day, or milestone days)
+ * For a 5-day challenge: GIFs on day 1, day 3, day 5 (completion)
+ * For a 7-day challenge: GIFs on day 1, day 3, day 5, day 7 (completion)
+ * General rule: day 1, then spread 1-2 more before final day
+ */
+function shouldSendGif(dayNum, totalDays) {
+  // Always GIF on day 1 (first verified day)
+  if (dayNum === 1) return true;
+  
+  // For short challenges (3-5 days), GIF at midpoint
+  if (totalDays <= 5) {
+    const midpoint = Math.ceil(totalDays / 2);
+    if (dayNum === midpoint) return true;
+  }
+  
+  // For longer challenges (6+ days), GIF at 1/3 and 2/3 marks
+  if (totalDays >= 6) {
+    const oneThird = Math.ceil(totalDays / 3);
+    const twoThirds = Math.ceil((totalDays * 2) / 3);
+    if (dayNum === oneThird || dayNum === twoThirds) return true;
+  }
+  
+  return false;
+}
 
 /**
  * Get pattern data for a participant (streaks, recent misses, etc.)
@@ -173,10 +199,19 @@ async function handleCheckInResponse(phone, message) {
   
   // Build response with specific pressure
   const pressure = await buildPressureMessage(participant, standings, checkIn.day_number);
+  const totalDays = participant.challenges.duration_days;
   
   let msg;
   if (isYes) {
     msg = `Logged. ${participant.score}/${checkIn.day_number}\n\n${pressure}`;
+    
+    // Send GIF on milestone days for YES responses
+    if (shouldSendGif(checkIn.day_number, totalDays)) {
+      const context = checkIn.day_number === 1 ? 'success' : 'complete';
+      await sendSMSWithAIGif(phone, msg, context);
+    } else {
+      await sendSMS(phone, msg);
+    }
   } else {
     const pattern = await getPatternData(participant.id, participant.challenges.id);
     if (pattern.missStreak >= 2) {
@@ -184,9 +219,14 @@ async function handleCheckInResponse(phone, message) {
     } else {
       msg = `Miss.\n\n${pressure}`;
     }
+    
+    // Send failure GIF on milestone days for NO responses
+    if (shouldSendGif(checkIn.day_number, totalDays)) {
+      await sendSMSWithAIGif(phone, msg, 'failure');
+    } else {
+      await sendSMS(phone, msg);
+    }
   }
-
-  await sendSMS(phone, msg);
 
   // Check if everyone has responded
   await checkAllResponded(participant.challenges.id, today, checkIn.day_number);
