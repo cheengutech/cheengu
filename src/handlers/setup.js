@@ -19,12 +19,12 @@ const STEPS = [
 
 async function getSetupState(phone) {
   console.log('🔍 Looking for setup state for:', phone);
-  const { data } = await supabase
+  const { data, error } = await supabase  // ADD error here
     .from('setup_state')
     .select('*')
     .eq('phone', phone)
     .single();
-    console.log('🔍 Setup state result:', data, 'Error:', error);
+  console.log('🔍 Setup state result:', data, 'Error:', error);
   return data;
 }
 
