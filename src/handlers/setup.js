@@ -35,6 +35,8 @@ async function updateSetupState(phone, step, data = {}) {
     .eq('phone', phone)
     .single();
 
+    console.log('🔍 Existing state:', existing, 'Error:', selectError);
+
   if (existing) {
     const mergedData = { ...existing.data, ...data };
     await supabase
@@ -46,6 +48,8 @@ async function updateSetupState(phone, step, data = {}) {
         expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
       })
       .eq('phone', phone);
+      console.log('🔍 Update error:', updateError);
+
   } else {
     await supabase
       .from('setup_state')
@@ -55,6 +59,8 @@ async function updateSetupState(phone, step, data = {}) {
         data,
         expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString()
       });
+      console.log('🔍 Insert error:', insertError);
+
   }
 }
 
