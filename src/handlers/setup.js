@@ -29,7 +29,7 @@ async function getSetupState(phone) {
 }
 
 async function updateSetupState(phone, step, data = {}) {
-  const { data: existing } = await supabase
+  const { data: existing, error: selectError } = await supabase
     .from('setup_state')
     .select('*')
     .eq('phone', phone)
