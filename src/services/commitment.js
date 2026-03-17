@@ -3,7 +3,7 @@
 // ============================================================================
 
 const { supabase } = require('../config/database');
-const { sendSMS } = require('./sms');
+const { sendSMS, sendSMSWithAIGif } = require('./sms');
 
 async function handleFailure(user, log) {
   // Use the user's custom penalty amount, or default to $5
@@ -39,16 +39,17 @@ async function handleFailure(user, log) {
   const oldBar = '🟩'.repeat(oldPercent) + '⬜'.repeat(10 - oldPercent);
   const newBar = '🟩'.repeat(newPercent) + '⬜'.repeat(10 - newPercent);
 
+  // Regular SMS for normal failures
   await sendSMS(
     user.phone,
-    `❌ Day marked as FAIL\n\n💰 ${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nText STATUS to check progress or HOW for help.`
+    `FAIL.\n\n${oldBar} → ${newBar}\n$${oldStake} → $${Math.max(0, newStake)} (-$${penaltyAmount})\n\nDo better tomorrow.`
   );
   
   // Notify judge
   const userName = user.user_name || user.phone.slice(-4);
   await sendSMS(
     user.judge_phone,
-    `Verified: ${userName} did not complete their commitment today.`
+    `Verified: ${userName} failed today.`
   );
 
   if (newStake <= 0) {
@@ -98,41 +99,58 @@ async function endCommitment(userId, reason) {
     .update({ status: 'completed' })
     .eq('id', userId);
 
-  // Build report card - compact format
-  let userReport = `📊 COMMITMENT COMPLETE\n`;
-  userReport += `Goal: ${user.commitment_text}\n`;
-  userReport += `Duration: ${startDate} – ${endDate}\n\n`;
-  userReport += `Final Result: ${passedDays}/${totalDays} days\n`;
-  userReport += `Missed: ${failedDays} day${failedDays !== 1 ? 's' : ''}\n\n`;
-  userReport += `Stake: $${penaltyPerDay}/day\n`;
-  userReport += `Total Owed: $${totalLost}\n`;
-  userReport += `Owed To: ${totalLost > 0 ? judgeName : 'Nobody — Perfect! 🎉'}`;
+  // Determine if perfect, partial, or total loss
+  const isPerfect = failedDays === 0;
+  const isStakeDepleted = reason === 'stake_depleted';
+
+  // Build report card - drill sergeant style
+  let userReport = `MISSION ${isPerfect ? 'ACCOMPLISHED' : 'COMPLETE'}.\n\n`;
+  userReport += `"${user.commitment_text}"\n`;
+  userReport += `${startDate} – ${endDate}\n\n`;
+  userReport += `Result: ${passedDays}/${totalDays} days\n`;
   
-  if (totalLost > 0) {
-    userReport += `\n\nSettle up via Venmo, cash, etc.`;
+  if (isPerfect) {
+    userReport += `\nPerfect record. Outstanding, soldier.`;
+  } else if (isStakeDepleted) {
+    userReport += `Missed: ${failedDays}\n\n`;
+    userReport += `Stake: GONE. All $${originalStake} owed to ${judgeName}.\n\n`;
+    userReport += `Settle up. Then text START and try again.`;
+  } else {
+    userReport += `Missed: ${failedDays}\n\n`;
+    userReport += `Owed to ${judgeName}: $${totalLost}\n\n`;
+    userReport += `Settle up via Venmo, cash, etc.\n\nText START for a new mission.`;
   }
-  userReport += `\n\nText START for a new commitment.`;
 
   // Judge report
-  let judgeReport = `📊 COMMITMENT COMPLETE\n`;
-  judgeReport += `Goal: ${user.commitment_text}\n`;
-  judgeReport += `Duration: ${startDate} – ${endDate}\n\n`;
-  judgeReport += `Final Result: ${passedDays}/${totalDays} days\n`;
-  judgeReport += `Missed: ${failedDays} day${failedDays !== 1 ? 's' : ''}\n\n`;
-  judgeReport += `Stake: $${penaltyPerDay}/day\n`;
-  judgeReport += `Total Owed: $${totalLost}\n`;
-  judgeReport += `Owed To: ${totalLost > 0 ? 'You' : 'Nobody — Perfect! 🎉'}`;
+  let judgeReport = `COMMITMENT COMPLETE.\n\n`;
+  judgeReport += `"${user.commitment_text}"\n`;
+  judgeReport += `${startDate} – ${endDate}\n\n`;
+  judgeReport += `Result: ${passedDays}/${totalDays} days\n`;
   
-  if (totalLost > 0) {
-    judgeReport += `\n\nSettle up via Venmo, cash, etc.`;
+  if (isPerfect) {
+    judgeReport += `\nPerfect. ${userName} crushed it.`;
+  } else {
+    judgeReport += `Missed: ${failedDays}\n\n`;
+    judgeReport += `${userName} owes you: $${totalLost}\n\n`;
+    judgeReport += `Collect via Venmo, cash, etc.`;
   }
-  judgeReport += `\n\nThanks for judging.`;
 
-  // Send report cards
-  await sendSMS(user.phone, userReport);
-  await sendSMS(user.judge_phone, judgeReport);
+  // HIGH-IMPACT MOMENTS: Send with AI GIF
+  if (isPerfect) {
+    // Perfect completion - celebration GIF
+    await sendSMSWithAIGif(user.phone, userReport, 'complete');
+    await sendSMS(user.judge_phone, judgeReport);
+  } else if (isStakeDepleted) {
+    // Lost everything - game over GIF
+    await sendSMSWithAIGif(user.phone, userReport, 'failure');
+    await sendSMS(user.judge_phone, judgeReport);
+  } else {
+    // Partial completion - regular SMS
+    await sendSMS(user.phone, userReport);
+    await sendSMS(user.judge_phone, judgeReport);
+  }
   
-  console.log(`📊 Report cards sent for ${userName}'s commitment`);
+  console.log(`📊 Report cards sent for ${userName}'s commitment (${isPerfect ? 'PERFECT' : isStakeDepleted ? 'DEPLETED' : 'partial'})`);
 }
 
 module.exports = { handleFailure, endCommitment };

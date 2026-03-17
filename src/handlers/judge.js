@@ -1,7 +1,7 @@
 // src/handlers/judge.js
 
 const { supabase } = require('../config/database');
-const { sendSMS } = require('../services/sms');
+const { sendSMS, sendSMSWithAIGif } = require('../services/sms');
 const { handleFailure } = require('../services/commitment');
 const { getTodayDate } = require('../utils/timezone');
 
@@ -64,7 +64,7 @@ async function handleJudgeResponse(phone, message) {
       : `You\'ll get one check-in on ${judge.users.deadline_date}.`;
       
     await sendSMS(normalizedPhone, `You're now ${userName}'s accountability judge! ${typeText}`);
-    await sendSMS(judge.users.phone, 'Your judge accepted! Your commitment starts now. 💪\n\nTrack progress: cheengu.com/dashboard\n\nText HELP for help.');
+    await sendSMS(judge.users.phone, 'Your judge accepted! Your commitment starts now. 💪\n\nTrack progress: cheengu.com/dashboard\n\nText HOW for help.');
     return true;
   }
 
@@ -237,8 +237,23 @@ async function handleJudgeVerification(phone, message) {
         timestamp: Date.now()
       });
 
-      await sendSMS(judge.users.phone, '✅ Day verified by your judge! Keep it up! 💪');
-      await sendSMS(normalizedPhone, `✅ Marked ${userName} as PASS for today.\n\nMade a mistake? Reply UNDO in the next 5 minutes.`);
+      // Check if this is the first verified day (HIGH-IMPACT MOMENT)
+      const { count } = await supabase
+        .from('daily_logs')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', judge.user_id)
+        .eq('outcome', 'pass');
+      
+      const isFirstDay = count === 1;
+      
+      if (isFirstDay) {
+        // First day success - send with GIF
+        await sendSMSWithAIGif(judge.users.phone, 'Day 1 VERIFIED. You showed up. Now do it again tomorrow.', 'success');
+      } else {
+        await sendSMS(judge.users.phone, 'Day verified. Keep moving.');
+      }
+      
+      await sendSMS(normalizedPhone, `Marked ${userName} as PASS.\n\nMistake? Reply UNDO (5 min window).`);
     } else {
       // FAIL
       if (judge.users.commitment_type === 'deadline') {
@@ -257,7 +272,7 @@ async function handleJudgeVerification(phone, message) {
         timestamp: Date.now()
       });
       
-      await sendSMS(normalizedPhone, `❌ Marked ${userName} as FAIL for today.\n\nMade a mistake? Reply UNDO in the next 5 minutes.`);
+      await sendSMS(normalizedPhone, `Marked ${userName} as FAIL.\n\nMistake? Reply UNDO (5 min window).`);
     }
 
     return true;

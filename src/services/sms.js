@@ -21,7 +21,7 @@ async function searchGif(query) {
   try {
     // Klipy API (drop-in replacement for Tenor, run by ex-Tenor team)
     const response = await fetch(
-      `https://api.klipy.com/v1/search?q=${encodeURIComponent(query)}&key=${process.env.dklwQB0mFWxfu3KZwxDKx4CRz1DYEJBCsL8lcGBc2OBS2wVBs62IzKLyGrL0T5Rq}&limit=1&media_filter=gif`
+      `https://api.klipy.com/v1/search?q=${encodeURIComponent(query)}&key=${process.env.KLIPY_API_KEY}&limit=1&media_filter=gif`
     );
     
     if (!response.ok) {
