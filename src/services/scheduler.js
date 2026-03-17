@@ -75,7 +75,7 @@ async function sendDailyCheckIn(userId, userPhone, judgePhone, commitmentText, t
   console.log(`📤 Sending reminder to user: ${userPhone}`);
   await sendSMS(
     userPhone,
-    `⏰ Day ${dayNumber} of ${totalDays}\n\n"${commitmentText}"\n\n💰 ${stakeBar} $${user.stake_remaining}/$${user.original_stake}\n\nYour judge is being asked to verify now.\n\nText STATUS or visit cheengu.com/dashboard`
+    `Day ${dayNumber}/${totalDays}.\n\n"${commitmentText}"\n\n${stakeBar} $${user.stake_remaining}/$${user.original_stake}\n\nYour judge is being asked now. Don't let them down.`
   );
 
   // Ask judge to verify
@@ -112,7 +112,7 @@ async function sendDeadlineCheckIn(userId, userPhone, judgePhone, commitmentText
   // Send reminder to user
   await sendSMS(
     userPhone,
-    `⏰ Deadline day!\n\n"${commitmentText}"\n\nYour judge is being asked to verify now.\n\nText STATUS to check progress or HELP for help.`
+    `D-DAY.\n\n"${commitmentText}"\n\nYour judge decides your fate now.`
   );
 
   // Ask judge about final outcome
@@ -261,8 +261,8 @@ function startDailyCronJobs() {
           
           const userName = log.users.user_name || log.users.phone.slice(-4);
           
-          await sendSMS(log.users.phone, `⚠️ Your judge didn't respond after 2 reminders. Day marked as FAIL.\n\nMake sure your judge is available to verify!`);
-          await sendSMS(log.users.judge_phone, `You didn't respond to verify ${userName}'s commitment. It was marked as FAIL.`);
+          await sendSMS(log.users.phone, `Your judge went silent. Day marked FAIL.\n\nGet a judge who actually shows up, or that's on you.`);
+          await sendSMS(log.users.judge_phone, `You didn't verify ${userName}. Marked as FAIL. Do better.`);
           
           console.log(`❌ Auto-FAIL after 2 reminders (no judge response): ${log.users.phone}`);
         }
@@ -287,7 +287,7 @@ function startDailyCronJobs() {
         if (userHour === 9) { // 9am in user's timezone
           await sendSMS(
             user.phone,
-            `🌅 Today's commitment:\n\n"${user.commitment_text}"\n\nCheck-in at 9pm.`
+            `Rise and grind.\n\n"${user.commitment_text}"\n\nVerification at 2100. Don't make your judge wait.`
           );
           console.log(`🌅 Morning reminder sent to ${user.phone}`);
         }
@@ -323,13 +323,13 @@ function startDailyCronJobs() {
           let message;
           
           if (isOneDayOut) {
-            message = `⚠️ Deadline is TOMORROW!\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} on the line.`;
+            message = `TOMORROW IS D-DAY.\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} rides on it. No excuses.`;
           } else if (isThreeDaysOut) {
-            message = `⏰ 3 days left.\n\n"${user.commitment_text}"\n\nTime to lock in.`;
+            message = `3 days. Clock's ticking.\n\n"${user.commitment_text}"\n\nFinish strong or pay up.`;
           } else if (isSevenDaysOut) {
-            message = `📅 One week left.\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} at stake.`;
+            message = `One week left.\n\n"${user.commitment_text}"\n\n$${user.stake_remaining} on the line. Move.`;
           } else {
-            message = `Weekly reminder: ${daysLeft} days left.\n\n"${user.commitment_text}"`;
+            message = `Weekly check: ${daysLeft} days remaining.\n\n"${user.commitment_text}"`;
           }
           
           await sendSMS(user.phone, message);
@@ -338,6 +338,57 @@ function startDailyCronJobs() {
       }
     } catch (error) {
       console.error('Error in deadline progress job:', error);
+    }
+  });
+
+  // 10am user's timezone - Re-engagement for completed users (3 and 7 days after)
+  cron.schedule('0 * * * *', async () => {
+    try {
+      const { data: completedUsers } = await supabase
+        .from('users')
+        .select('*')
+        .eq('status', 'completed');
+
+      for (const user of completedUsers || []) {
+        const userHour = getUserHour(user.timezone);
+        if (userHour !== 10) continue; // Only at 10am
+        
+        // Check if they have an active commitment (might have re-enrolled)
+        const { data: activeCheck } = await supabase
+          .from('users')
+          .select('id')
+          .eq('phone', user.phone)
+          .eq('status', 'active')
+          .single();
+        
+        if (activeCheck) continue; // Already active, skip
+        
+        const endDate = new Date(user.commitment_end_date);
+        const daysSinceEnd = Math.floor((new Date() - endDate) / (1000 * 60 * 60 * 24));
+        
+        // Only send on day 1, day 3 and day 7
+        if (daysSinceEnd === 1) {
+          await sendSMS(
+            user.phone,
+            `${user.user_name || 'Recruit'}. Your commitment ended yesterday. You gonna coast now, or are you ready for the next one?\n\nText START.`
+          );
+          console.log(`📣 Re-engagement (day 1) sent to ${user.phone}`);
+        } else if (daysSinceEnd === 3) {
+          await sendSMS(
+            user.phone,
+            `3 days since your last commitment. The longer you wait, the softer you get.\n\nText START.`
+          );
+          console.log(`📣 Re-engagement (day 3) sent to ${user.phone}`);
+        } else if (daysSinceEnd === 7) {
+          await sendSMS(
+            user.phone,
+            `One week. Radio silence ends here. Text START when you're ready to get back in the fight.`
+          );
+          console.log(`📣 Re-engagement (day 7 - final) sent to ${user.phone}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error in re-engagement job:', error);
     }
   });
 
